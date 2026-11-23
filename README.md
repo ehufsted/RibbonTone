@@ -30,6 +30,13 @@ or Edge), or open http://localhost:8080/verify.html.
 - **Wall pins**: any of the above, or **each ribbon its own heights**, which
   gives the best image and no horizontal lines.
 
+## 3D view
+
+The whole piece in 3D (WebGL): ribbons, the combs as solid or clear prisms (or,
+with wall pins, slotted tabs on stand-off rods), and an optional black box
+around the back, sides, top and bottom. Drag to orbit, right-drag to pan, wheel
+or pinch to zoom. Presets include the design viewpoint, which matches the Preview.
+
 ## Outputs
 
 - Combs as SVG or DXF (cut red, engrave blue; long combs split to fit the cutter bed).

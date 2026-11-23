@@ -102,6 +102,11 @@
   }
   .canvaswrap { margin: auto; box-shadow: 0 2px 18px #0008; line-height: 0; }
   .canvaswrap canvas { display: block; cursor: crosshair; }
+  .canvaswrap[hidden] { display: none; }
+  #view3d { width: 100%; height: 100%; display: block; cursor: grab; touch-action: none; }
+  #view3d[hidden] { display: none; }
+  .stage.is3d { padding: 0; overflow: hidden; }
+  input[type=color] { width: 40px; height: 24px; padding: 0 2px; border: 1px solid var(--line); border-radius: 4px; background: #12131a; cursor: pointer; }
 
   footer {
     flex: 0 0 auto; border-top: 1px solid var(--line); padding: 6px 12px;
@@ -263,6 +268,7 @@
         <div class="row" data-for="perRibbon" title="brackets per ribbon between the bars"><label for="maxPerRibbon">Most per ribbon</label><input type="number" id="maxPerRibbon" min="0" step="1"></div>
         <div class="row" data-for="bunched perRibbon"><label for="minSpacing">Least spacing</label><input type="number" id="minSpacing" class="len" min="0" step="any"><span class="unit u"></span></div>
         <div class="row" data-for="bunched perRibbon"><label for="maxSpan">Longest span</label><input type="number" id="maxSpan" class="len" min="0" step="any"><span class="unit u"></span></div>
+        <div class="row" id="standoffRow" title="pins: from the back wall to the ribbons' centre line; the rod runs from the wall to the tab's back edge"><label for="standoff">Pin stand-off</label><input type="number" id="standoff" class="len" min="0" step="any"><span class="unit u"></span></div>
         <div class="row" title="how much of each ribbon's tone error the next ribbon makes up for (the eye mixes neighbours)"><label for="diffusion">Spread error</label><input type="range" id="diffusion" min="0" max="1" step="0.05"><span class="val" id="diffusionVal"></span></div>
         <ul class="notes" id="notes"></ul>
       </div>
@@ -279,6 +285,7 @@
           <div class="row"><label for="holeDia">Mounting holes</label><input type="number" id="holeDia" class="len" min="0" step="any"><span class="unit u"></span></div>
           <div class="row" title="longest comb piece your cutter takes; longer combs are cut between ribbons"><label for="bedMm">Cutter bed</label><input type="number" id="bedMm" class="len" min="0" step="any"><span class="unit u"></span></div>
           <div class="row"><label for="minWeb">Least web</label><input type="number" id="minWeb" class="len" min="0" step="any"><span class="unit u"></span></div>
+          <div class="row" title="the sheet the combs and pin tabs are cut from"><label for="combThick">Sheet thickness</label><input type="number" id="combThick" class="len" min="0" step="any"><span class="unit u"></span></div>
           <label class="check" title="cut each comb along its centre line, so ribbons are laid into notches and clamped instead of threaded"><input type="checkbox" id="splitComb"> Split combs for assembly</label>
           <p class="note" id="combNote"></p>
         </div>
@@ -304,12 +311,26 @@
         <button data-view="diff" aria-pressed="false">Difference</button>
         <button data-view="brackets" aria-pressed="false" title="where every bracket goes and its slot angle">Brackets</button>
         <button data-view="distance" aria-pressed="false" title="the preview as it looks from across the room">Distance</button>
+        <button data-view="view3d" aria-pressed="false" title="the whole piece in 3D: ribbons, combs or pins, and the box">3D</button>
       </div>
+      <span class="distctl" id="ctl3d" hidden>
+        <select id="camPreset" title="camera">
+          <option value="">View from…</option>
+          <option value="design">Design viewpoint</option>
+          <option value="front">Front</option>
+          <option value="quarter">Three-quarter</option>
+          <option value="top">Top</option>
+          <option value="side">Side</option>
+        </select>
+        <label class="check" title="the black box around the back, sides, top and bottom"><input type="checkbox" id="box3d"> Box</label>
+        <select id="combLook" title="how the combs and pin tabs are drawn"><option value="solid">Solid combs</option><option value="clear">Clear combs</option></select>
+        <input type="color" id="combColor" title="solid comb colour">
+      </span>
       <span class="distctl" id="distControls" hidden>
         <label>From <input type="range" id="distView" min="0.5" max="30" step="0.5" value="4"> <span id="distViewVal">4 m</span></label>
         <label class="check"><input type="checkbox" id="distCompare" checked> beside the target</label>
       </span>
-      <label class="check">Zoom <select id="zoom">
+      <label class="check" id="zoomCtl">Zoom <select id="zoom">
         <option value="1">Fit</option><option value="2">2×</option><option value="4">4×</option><option value="8">8×</option>
       </select></label>
       <div class="spacer"></div>
@@ -317,6 +338,7 @@
     </div>
     <div class="stage" id="stage">
       <div class="canvaswrap" id="wrap"><canvas id="view"></canvas></div>
+      <canvas id="view3d" hidden></canvas>
     </div>
   </section>
 </main>

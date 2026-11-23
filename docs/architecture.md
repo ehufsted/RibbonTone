@@ -68,6 +68,29 @@ pipeline directly.
   signed turn since the bracket above), a 1:1 wall template, the calibration
   combs. SVG and DXF (R12, y flipped) from the same shapes.
 
+## 3D view
+
+`core/scene.js` builds the geometry (DOM-free, tested); `app/view3d.js` draws it
+with hand-written WebGL. World space: x as on the piece, y up, z toward the
+viewer, ribbons' centre lines at z = 0.
+
+- Ribbons: strips cut at every bracket and about every 2° of turn, with the
+  cross-section `render.js` projects.
+- Combs: solid prisms (comb length × comb depth × sheet thickness) that the
+  ribbons simply pass through; the depth buffer hides the part inside, which
+  reads as a slot. Slot outlines are drawn on both faces. Solid (any colour) or
+  clear acrylic (blended, no depth write, farthest first, back faces then front:
+  so prism triangles must wind counter-clockwise from outside, which a test checks).
+- Pins: the top and bottom bars stay combs; every bracket between them is a
+  square one-slot tab on a stand-off rod from the back wall (`standoff` behind
+  the ribbons).
+- Box: back, sides, top and bottom, open at the front. Its depth is the combs';
+  the combs mount to its sides; with pins the back wall is the stand-off away.
+- Shading is the optics model (Lambert + sheen, same light, same exposure), so
+  the design-viewpoint preset matches the 2D Preview. No shadows yet.
+- A WebGL canvas cannot be a 2D canvas too, so the 3D view has its own canvas.
+  Headless checks need `--use-angle=swiftshader --enable-unsafe-swiftshader`.
+
 ## Verification
 
 `run-tests.ps1` (port 8098) runs `verify.html` headless: optics, twist, target
@@ -80,3 +103,5 @@ angle agreement), projects, and the pipeline's limits and layouts.
 Heat-set jigs, 3D-printed ribbons (a continuous-profile mode: the ideal path is
 already it), plastically twisted metal strips, several viewpoints at once,
 colour, a photo reader for the calibration curve, shadows across slices.
+3D view: shadows (a shadow map), hover picking, a walk-by slider, an assembly
+slider, a section plane, OBJ export, cutting files for the pin tabs.

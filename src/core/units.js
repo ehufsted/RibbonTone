@@ -88,6 +88,12 @@ export const DEFAULTS = {
   bedMm: 600,           // mm, longest comb piece the cutter takes
   splitComb: false,     // cut every comb along its centre line for assembly
   minWeb: 2,            // mm of material between neighbouring slots
+  combThick: 3,         // mm, sheet the combs and pin tabs are cut from
+  standoff: 45,         // mm, pins: back wall to the ribbons' centre line
+  // the 3D view
+  box3d: true,          // the black box around the back, sides, top and bottom
+  combLook: 'solid',    // 'solid' | 'clear'
+  combColor: '#222222', // solid combs and tabs
 };
 
 /** The settings a material preset sets. */
