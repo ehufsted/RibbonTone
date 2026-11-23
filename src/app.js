@@ -1,0 +1,731 @@
+// UI wiring. Compute happens in worker.js; this module gathers settings, paints
+// the plan and exports it. The only file that knows what a DOM is.
+//
+// SETTINGS LIVE IN `state.set`, IN MILLIMETERS. Every control is a FIELDS
+// entry; length fields (class "len") show their value in the chosen units and
+// write millimeters back, so switching units only rewrites what is displayed.
+// The same object is what the worker gets, what localStorage keeps and what a
+// project file holds.
+//
+// THE PREVIEW IS DRAWN FROM THE PLAN: per-sample angles, shaded here by
+// core/render.js (the same optics the solver used, plus neighbours' shadows),
+// so every view is crisp at any zoom.
+
+import { DEFAULTS, MATERIALS, materialSettings, toMm, fromMm, pieceGeometry, toneLuminance, lenText } from './core/units.js';
+import { toEncoded } from './core/color.js';
+import { quarterTurnLength, maxTwistDeg } from './core/twist.js';
+import { toneMap } from './core/target.js';
+import { backdropY, pitchModel } from './core/optics.js';
+import { ribbonSlices, paintOrder } from './core/render.js';
+import { planCombs, calibrationCombs, stackPieces, piecesSVG, piecesDXF, bracketCSV, wallTemplateSVG, mod180 } from './core/fab.js';
+import { shrinkLinear, meanDeltaE, apparentPx, SCREEN_M } from './core/distance.js';
+import { projectJSON, parseProject } from './core/project.js';
+import { problemWith } from './pipeline.js';
+import { generateSample } from './app/samples.js';
+
+const $ = (id) => document.getElementById(id);
+const STORE = 'ribbontone.v1';
+
+const LEN = ['widthMm', 'heightMm', 'ribbonW', 'pitch', 'thickness', 'viewXMm', 'rowSpacing', 'minSpacing', 'maxSpan',
+  'slotClear', 'minSlot', 'combMargin', 'combEnd', 'holeDia', 'bedMm', 'minWeb'];
+const NUM = ['reflectance', 'sheen', 'gloss', 'strainPct', 'tensionN', 'density', 'G', 'E', 'bgReflectance', 'distM', 'maxRows', 'maxPerRibbon'];
+const RANGE = { gamma: (v) => v.toFixed(2), brightness: (v) => v.toFixed(2), contrast: (v) => v.toFixed(2),
+  lightAz: (v) => `${v}°`, lightEl: (v) => `${v}°`, ambient: (v) => v.toFixed(2), diffusion: (v) => v.toFixed(2) };
+const CHECK = ['curveOn', 'splitComb'];
+const SELECT = ['material', 'layout'];
+/** Settings that only change the cutting files: no new solve. */
+const FAB_ONLY = new Set(['slotClear', 'minSlot', 'combMargin', 'combEnd', 'holeDia', 'bedMm', 'minWeb', 'splitComb']);
+/** The material preset's settings: editing one makes the material "custom". */
+const MATERIAL_KEYS = Object.keys(materialSettings('satin'));
+
+const state = {
+  rgba: null,
+  imageName: 'ribbons',
+  imageSrc: null,       // {kind:'sample', name} | {kind:'file', name, dataURL}
+  lum: null,            // toned luminance, for the Target view
+  set: { ...DEFAULTS },
+  view: 'preview',
+  plan: null,
+  slices: null,         // core/render.js, per view
+  exposure: 1,          // relative Y shown as white (exposureOf)
+  idealSlices: null,
+  targetCanvas: null,
+  jobId: 0,
+  pending: false,
+  alerted: false,
+};
+window.ribbonTone = state;   // for driving the app from DevTools / the CDP harness
+
+// ------------------------------------------------------------------ persistence
+function save() {
+  try { localStorage.setItem(STORE, JSON.stringify(state.set)); } catch { /* storage unavailable */ }
+}
+
+function restore() {
+  let o = null;
+  try { o = JSON.parse(localStorage.getItem(STORE) || 'null'); } catch { o = null; }
+  if (!o || typeof o !== 'object') return;
+  for (const [k, v] of Object.entries(o)) if (k in DEFAULTS && typeof v === typeof DEFAULTS[k] && (typeof v !== 'number' || isFinite(v))) state.set[k] = v;
+}
+
+// ------------------------------------------------------------------ worker
+let worker = null;
+
+function spawnWorker() {
+  try {
+    const w = new Worker(new URL('./worker.js', import.meta.url), { type: 'module' });
+    w.onmessage = onWorkerMessage;
+    w.onerror = (e) => setStatus(`worker error: ${e.message}`, 'bad');
+    return w;
+  } catch (err) {
+    setStatus('module workers unavailable — see console', 'bad');
+    console.error(err);
+    return null;
+  }
+}
+worker = spawnWorker();
+
+/** A busy worker cannot see a stop message; terminating it is the only cancel. */
+function cancelInFlight() {
+  if (!worker || !state.pending) return;
+  worker.terminate();
+  worker = spawnWorker();
+  state.pending = false;
+}
+
+function onWorkerMessage(ev) {
+  const msg = ev.data;
+  if (msg.jobId !== state.jobId) return;
+  if (msg.type === 'progress') { setStatus(msg.stage + '…'); return; }
+  if (msg.type === 'error') {
+    state.pending = false;
+    setStatus(`error: ${msg.message}`, 'bad');
+    console.error(msg.stack || msg.message);
+    if (msg.code === 'TOO_MANY' && !state.alerted) { state.alerted = true; window.alert(msg.message); }
+    return;
+  }
+  if (msg.type === 'done') {
+    state.pending = false;
+    state.alerted = false;
+    state.plan = msg.plan;
+    state.slices = ribbonSlices(msg.plan, 'th');
+    state.exposure = exposureOf(msg.plan, state.slices);
+    state.idealSlices = null;
+    state.targetCanvas = null;
+    setStatus(`ready · ${(msg.ms / 1000).toFixed(1)} s`);
+    paint();
+    updateStats();
+    updateNotes();
+  }
+}
+
+function run() {
+  if (!state.rgba || !worker) return;
+  updatePieceNote();
+  const problem = problemWith(state.set);
+  if (problem) { setStatus(problem, 'bad'); return; }
+  save();
+  cancelInFlight();
+  if (!worker) return;
+  state.jobId++;
+  state.pending = true;
+  setStatus('working…');
+  worker.postMessage({ type: 'run', jobId: state.jobId, rgba: state.rgba, settings: { ...state.set } });
+}
+
+let runTimer = null;
+function scheduleRun(delay = 300) {
+  clearTimeout(runTimer);
+  runTimer = setTimeout(run, delay);
+}
+
+// ------------------------------------------------------------------ fields
+const L = (mm, dp) => (state.set.units === 'in' ? +(fromMm(mm, 'in')).toFixed(dp ?? 3) : +(+mm).toFixed(dp ?? 1));
+const unitLabel = () => (state.set.units === 'in' ? 'in' : 'mm');
+const lenTxt = (mm) => lenText(mm, state.set.units);
+
+/** Every control from state.set. */
+function showFields() {
+  const s = state.set;
+  for (const id of LEN) $(id).value = L(s[id], s.units === 'in' ? 4 : 2);
+  for (const id of NUM) $(id).value = s[id];
+  for (const [id, fmt] of Object.entries(RANGE)) { $(id).value = s[id]; $(`${id}Val`).textContent = fmt(s[id]); }
+  for (const id of CHECK) $(id).checked = !!s[id];
+  $('material').value = MATERIALS[s.material] ? s.material : 'custom';
+  $('layout').value = s.layout;
+  $('curve').value = s.curve;
+  for (const el of document.querySelectorAll('.u')) el.textContent = unitLabel();
+  for (const b of document.querySelectorAll('#unitSeg button')) b.setAttribute('aria-pressed', String(b.dataset.units === s.units));
+  for (const b of document.querySelectorAll('#holdSeg button')) b.setAttribute('aria-pressed', String(b.dataset.hold === s.hold));
+  showLayout();
+}
+
+function changed(id) {
+  save();
+  if (FAB_ONLY.has(id)) { updateNotes(); return; }
+  scheduleRun();
+}
+
+function bindFields() {
+  const s = state.set;
+  const markCustom = (id) => { if (MATERIAL_KEYS.includes(id) && s.material !== 'custom') { s.material = 'custom'; $('material').value = 'custom'; } };
+  for (const id of LEN) {
+    $(id).addEventListener('input', () => {
+      const v = parseFloat($(id).value);
+      if (!isFinite(v)) return;
+      s[id] = toMm(v, s.units);
+      markCustom(id);
+      updatePieceNote();
+      changed(id);
+    });
+  }
+  for (const id of NUM) {
+    $(id).addEventListener('input', () => {
+      const v = parseFloat($(id).value);
+      if (!isFinite(v)) return;
+      s[id] = v;
+      markCustom(id);
+      updatePieceNote();
+      changed(id);
+    });
+  }
+  for (const [id, fmt] of Object.entries(RANGE)) {
+    $(id).addEventListener('input', () => {
+      s[id] = parseFloat($(id).value);
+      $(`${id}Val`).textContent = fmt(s[id]);
+      if (id === 'gamma' || id === 'brightness') updateLum();
+      changed(id);
+    });
+  }
+  for (const id of CHECK) {
+    $(id).addEventListener('change', () => { s[id] = $(id).checked; showLayout(); changed(id); });
+  }
+  $('material').innerHTML = Object.entries(MATERIALS).map(([k, m]) => `<option value="${k}">${m.label}</option>`).join('') +
+    '<option value="custom">Custom</option>';
+  $('material').addEventListener('change', () => {
+    s.material = $('material').value;
+    Object.assign(s, materialSettings(s.material));
+    showFields();
+    updatePieceNote();
+    changed('material');
+  });
+  $('layout').addEventListener('change', () => { s.layout = $('layout').value; showLayout(); changed('layout'); });
+  let curveTimer = null;
+  $('curve').addEventListener('input', () => { clearTimeout(curveTimer); curveTimer = setTimeout(() => { s.curve = $('curve').value; changed('curve'); }, 400); });
+  for (const b of document.querySelectorAll('#unitSeg button')) {
+    b.addEventListener('click', () => { s.units = b.dataset.units; showFields(); updatePieceNote(); updateStats(); updateNotes(); save(); });
+  }
+  for (const b of document.querySelectorAll('#holdSeg button')) {
+    b.addEventListener('click', () => { s.hold = b.dataset.hold; showFields(); changed('hold'); });
+  }
+}
+
+const BLURBS = {
+  even: 'Rows of brackets at one spacing, shared by every ribbon: the simplest to build, and what combs are for.',
+  bunched: 'Shared rows, placed where the image changes most: the same parts as even rows, a better image for the count.',
+  perRibbon: 'Every ribbon gets its own bracket heights: the best image and no horizontal lines, but one pin pair per bracket.',
+};
+
+/** Show the controls that apply to this layout and hold. */
+function showLayout() {
+  const s = state.set;
+  const layout = s.hold === 'combs' && s.layout === 'perRibbon' ? 'bunched' : s.layout;
+  $('layout').querySelector('option[value=perRibbon]').disabled = s.hold === 'combs';
+  if (s.hold === 'combs' && s.layout === 'perRibbon') { s.layout = 'bunched'; $('layout').value = 'bunched'; }
+  for (const el of document.querySelectorAll('[data-for]')) el.hidden = !el.dataset.for.split(' ').includes(layout);
+  $('layoutBlurb').textContent = BLURBS[layout] + (s.hold === 'combs' ? ' Combs hold whole rows, so each ribbon\'s own heights need wall pins.' : '');
+  $('curveBody').hidden = !s.curveOn;
+  $('combFab').hidden = false;
+}
+
+function updatePieceNote() {
+  const s = state.set;
+  if (state.rgba) {
+    const geo = pieceGeometry(state.rgba, s);
+    const n = geo.xs.length;
+    $('pieceNote').innerHTML = `<b>${n} ribbons</b> on a piece <b>${L(geo.W)} × ${L(geo.H)} ${unitLabel()}</b>` +
+      (s.heightMm > 0 ? ' · image cropped to cover' : '') + ` · ribbon length ${lenTxt(geo.H)} each, ${lenTxt(n * geo.H)} in all`;
+  }
+  if (s.ribbonW > 0 && s.strainPct > 0) {
+    $('twistNote').innerHTML = `Fastest twist <b>${s.units === 'in' ? `${(maxTwistDeg(s) * 25.4).toFixed(1)}°/in` : `${maxTwistDeg(s).toFixed(2)}°/mm`}</b>: white to black (a quarter turn) needs at least <b>${lenTxt(quarterTurnLength(s))}</b>.`;
+  }
+}
+
+// ------------------------------------------------------------------ painting
+const MAX_BACKING = 8192;
+const GREYS = Array.from({ length: 256 }, (_, v) => `rgb(${v},${v},${v})`);
+
+function sizeCanvas(W, H) {
+  const canvas = $('view'), stage = $('stage');
+  const fit = Math.min((stage.clientWidth - 28) / W, (stage.clientHeight - 28) / H);
+  const zoom = parseFloat($('zoom').value) || 1;
+  let cssPerMm = Math.max(0.02, fit * zoom);
+  const dpr = window.devicePixelRatio || 1;
+  let k = cssPerMm * dpr;
+  if (Math.max(W, H) * k > MAX_BACKING) { k = MAX_BACKING / Math.max(W, H); cssPerMm = k / dpr; }
+  canvas.width = Math.max(1, Math.round(W * k));
+  canvas.height = Math.max(1, Math.round(H * k));
+  canvas.style.width = `${Math.round(W * cssPerMm)}px`;
+  canvas.style.height = `${Math.round(H * cssPerMm)}px`;
+  return k;
+}
+
+/**
+ * Relative Y -> an 8-bit grey. The exposure is the brightest FACE any ribbon
+ * shows (sheen included), so nothing in the Preview clips: a face shown as
+ * white beside a backdrop shown dark then averages, from a distance, to exactly
+ * the pitch Y the Target shows.
+ */
+const greyOf = (Y, exposure) => Math.round(255 * toEncoded(Y / exposure));
+
+/** The brightest face any ribbon can show at any angle (the model's, before shadows; or the slices', with a measured curve). */
+function exposureOf(plan, slices) {
+  let ex = 1e-6;
+  if (plan.curvePts) {
+    for (const r of slices) for (const v of r.F) if (v > ex) ex = v;
+    return ex;
+  }
+  for (const r of plan.ribbons) for (let a = 0; a < 180; a += 0.5) ex = Math.max(ex, pitchModel(a, r.alpha, plan.s).F);
+  return ex;
+}
+
+/**
+ * The ribbons as seen, farthest from the viewer first. Each ribbon is ONE
+ * polygon (left edges down, right edges back up) filled with a vertical
+ * gradient stopped at every sample: drawn as separate slices, antialiasing
+ * leaves a hairline seam between each pair.
+ */
+function drawRibbons(ctx, plan, slices) {
+  const { W, H } = plan.piece, n = plan.n, dy = plan.dy;
+  const ex = state.exposure;
+  ctx.fillStyle = GREYS[greyOf(backdropY(plan.s), ex)];
+  ctx.fillRect(0, 0, W, H);
+  for (const i of paintOrder(plan)) {
+    const { xl, xr, F } = slices[i];
+    const grad = ctx.createLinearGradient(0, 0, 0, H);
+    for (let j = 0; j < n; j++) grad.addColorStop(((j + 0.5) * dy) / H, GREYS[greyOf(F[j], ex)]);
+    ctx.fillStyle = grad;
+    ctx.beginPath();
+    ctx.moveTo(xl[0], 0);
+    for (let j = 0; j < n; j++) ctx.lineTo(xl[j], (j + 0.5) * dy);
+    ctx.lineTo(xl[n - 1], H);
+    ctx.lineTo(xr[n - 1], H);
+    for (let j = n - 1; j >= 0; j--) ctx.lineTo(xr[j], (j + 0.5) * dy);
+    ctx.lineTo(xr[0], 0);
+    ctx.closePath();
+    ctx.fill();
+  }
+}
+
+/** The image fitted into the reachable range, per pixel, as the ribbons should show it. */
+function targetCanvas(plan) {
+  if (state.targetCanvas) return state.targetCanvas;
+  const lum = state.lum;
+  const c = document.createElement('canvas');
+  c.width = lum.width; c.height = lum.height;
+  const g = c.getContext('2d');
+  const img = g.createImageData(lum.width, lum.height);
+  const ex = state.exposure, k = plan.s.contrast;
+  for (let i = 0, q = 0; i < lum.data.length; i++, q += 4) {
+    const Lt = toneMap(lum.data[i], plan.range, k);
+    const v = greyOf(Lt * Lt * Lt, ex);
+    img.data[q] = img.data[q + 1] = img.data[q + 2] = v; img.data[q + 3] = 255;
+  }
+  g.putImageData(img, 0, 0);
+  state.targetCanvas = c;
+  return c;
+}
+
+function drawTarget(ctx, plan) {
+  const R = plan.imageRect;
+  ctx.save();
+  ctx.beginPath(); ctx.rect(0, 0, plan.piece.W, plan.piece.H); ctx.clip();
+  ctx.imageSmoothingEnabled = true;
+  ctx.drawImage(targetCanvas(plan), R.x, R.y, R.w, R.h);
+  ctx.restore();
+}
+
+/** Lightness error per ribbon and sample: blue = too dark, orange = too light, white = on target. */
+function drawDiff(ctx, plan) {
+  const { W, H } = plan.piece, p = plan.s.pitch, dy = plan.dy;
+  ctx.fillStyle = '#ffffff';
+  ctx.fillRect(0, 0, W, H);
+  for (const r of plan.ribbons) {
+    for (let j = 0; j < plan.n; j++) {
+      const d = Math.max(-1, Math.min(1, ((r.L[j] - r.Lt[j]) * 100) / 15));
+      if (Math.abs(d) < 0.02) continue;
+      const t = Math.abs(d);
+      const col = d < 0 ? [255 - 215 * t, 255 - 135 * t, 255] : [255, 255 - 115 * t, 255 - 235 * t];
+      ctx.fillStyle = `rgb(${col.map(Math.round).join(',')})`;
+      ctx.fillRect(r.x - p / 2, j * dy, p, dy + 0.05);
+    }
+  }
+}
+
+/** Where the brackets go: spans coloured by twist direction (orange clockwise from above, cyan counter), brighter = faster; a dial per bracket shows its slot angle from above (wall at the top). */
+function drawBrackets(ctx, plan, k) {
+  const { W, H } = plan.piece, s = plan.s;
+  ctx.fillStyle = '#15161b';
+  ctx.fillRect(0, 0, W, H);
+  const px = 1 / k;
+  if (plan.rows) {
+    ctx.strokeStyle = '#ababff55';
+    ctx.lineWidth = 1.5 * px;
+    for (const y of plan.rows) { ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(W, y); ctx.stroke(); }
+  }
+  const rDial = Math.min(s.pitch * 0.42, 12);
+  for (const r of plan.ribbons) {
+    for (let b = 0; b + 1 < r.knots.length; b++) {
+      const A = r.knots[b], B = r.knots[b + 1], d = B.a - A.a;
+      const rate = Math.abs(d) / Math.max(1e-9, B.y - A.y) / plan.kmaxDeg;
+      const t = Math.min(1, 0.25 + 0.75 * rate);
+      ctx.strokeStyle = Math.abs(d) < 0.5 ? '#777' : d > 0 ? `rgba(255,170,60,${t})` : `rgba(80,210,255,${t})`;
+      ctx.lineWidth = Math.max(2 * px, s.ribbonW * 0.18);
+      ctx.beginPath(); ctx.moveTo(r.x, A.y); ctx.lineTo(r.x, B.y); ctx.stroke();
+    }
+    for (const kn of r.knots) {
+      const a = mod180(kn.a) * Math.PI / 180;
+      const ux = Math.cos(a), uy = -Math.sin(a);
+      ctx.fillStyle = '#15161b';
+      ctx.strokeStyle = '#e6e7ea';
+      ctx.lineWidth = 1 * px;
+      ctx.beginPath(); ctx.arc(r.x, kn.y, rDial, 0, 2 * Math.PI); ctx.fill(); ctx.stroke();
+      ctx.lineWidth = Math.max(1.5 * px, rDial * 0.18);
+      ctx.beginPath(); ctx.moveTo(r.x - rDial * ux, kn.y - rDial * uy); ctx.lineTo(r.x + rDial * ux, kn.y + rDial * uy); ctx.stroke();
+    }
+  }
+}
+
+const HINTS = {
+  preview: 'the ribbons from the design viewpoint, the brightest face shown as white',
+  ideal: 'with a bracket everywhere: the best the twist limit allows; the gap to Preview is what the brackets cost',
+  target: 'the image fitted into the range the ribbons can reach',
+  diff: 'lightness error: blue = too dark, orange = too light (full colour = 15), white = on target',
+  brackets: 'dials: slot angle seen from above, wall at the top · spans: orange = clockwise from above, cyan = counter, brighter = faster',
+};
+
+function paint() {
+  const plan = state.plan;
+  if (!plan) return;
+  $('distControls').hidden = state.view !== 'distance';
+  if (state.view === 'distance') { paintDistance(plan); return; }
+  const k = sizeCanvas(plan.piece.W, plan.piece.H);
+  const ctx = $('view').getContext('2d');
+  ctx.setTransform(k, 0, 0, k, 0, 0);
+  drawView(ctx, plan, state.view, k);
+  $('hint').textContent = HINTS[state.view] || '';
+}
+
+function drawView(ctx, plan, view, k) {
+  if (view === 'preview') drawRibbons(ctx, plan, state.slices);
+  else if (view === 'ideal') { state.idealSlices ||= ribbonSlices(plan, 'ideal'); drawRibbons(ctx, plan, state.idealSlices); }
+  else if (view === 'target') drawTarget(ctx, plan);
+  else if (view === 'diff') drawDiff(ctx, plan);
+  else if (view === 'brackets') drawBrackets(ctx, plan, k);
+}
+
+/**
+ * The Distance view (core/distance.js): the preview at the size it subtends
+ * from D meters, averaged into CSS pixels in linear light, beside the target
+ * shrunk the same way.
+ */
+function paintDistance(plan) {
+  const D = parseFloat($('distView').value);
+  $('distViewVal').textContent = `${D} m`;
+  const { W, H } = plan.piece;
+  const tw = Math.max(8, Math.min(3000, Math.round(apparentPx(W, D))));
+  const th = Math.max(8, Math.round((tw * H) / W));
+  const k = Math.min(8, (4 * tw) / W, Math.sqrt(12e6 / (W * H)));
+  const hw = Math.max(1, Math.round(W * k)), hh = Math.max(1, Math.round(H * k));
+  const render = (view) => {
+    const c = document.createElement('canvas');
+    c.width = hw; c.height = hh;
+    const g = c.getContext('2d');
+    g.setTransform(k, 0, 0, k, 0, 0);
+    drawView(g, plan, view, k);
+    return shrinkLinear(g.getImageData(0, 0, hw, hh).data, hw, hh, tw, th);
+  };
+  const seen = render('preview');
+  const compare = $('distCompare').checked;
+  const tgt = render('target');
+  const gap = compare ? 16 : 0;
+  const canvas = $('view');
+  const dpr = window.devicePixelRatio || 1;
+  canvas.width = Math.round((compare ? 2 * tw + gap : tw) * dpr);
+  canvas.height = Math.round(th * dpr);
+  canvas.style.width = `${compare ? 2 * tw + gap : tw}px`;
+  canvas.style.height = `${th}px`;
+  const ctx = canvas.getContext('2d');
+  ctx.fillStyle = '#1d1f26';
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  const put = (px, x) => {
+    const c = document.createElement('canvas');
+    c.width = tw; c.height = th;
+    c.getContext('2d').putImageData(new ImageData(px, tw, th), 0, 0);
+    ctx.drawImage(c, 0, 0, tw, th, x * dpr, 0, tw * dpr, th * dpr);
+  };
+  put(seen, 0);
+  if (compare) put(tgt, tw + gap);
+  const merge = (plan.s.pitch * SCREEN_M) / (25.4 / 96);
+  $('hint').textContent = `as seen from ${D} m, if you sit ${SCREEN_M} m from a 96 dpi screen${compare ? ' (the target on the right)' : ''}: ` +
+    `ΔE ${meanDeltaE(seen, tgt).toFixed(1)} pixel for pixel; ` +
+    (D < merge ? `the ribbons still show as stripes (they merge from about ${Math.round(merge)} m)` : 'the ribbons have merged into tone');
+}
+
+// ------------------------------------------------------------------ hover
+function bindHover() {
+  $('view').addEventListener('mousemove', (e) => {
+    const plan = state.plan;
+    if (!plan || state.view === 'distance') return;
+    const rect = $('view').getBoundingClientRect();
+    const x = ((e.clientX - rect.left) / rect.width) * plan.piece.W, y = ((e.clientY - rect.top) / rect.height) * plan.piece.H;
+    const rb = plan.ribbons;
+    let i = 0;
+    for (let m = 1; m < rb.length; m++) if (Math.abs(rb[m].x - x) < Math.abs(rb[i].x - x)) i = m;
+    const r = rb[i];
+    if (!r || Math.abs(r.x - x) > plan.s.pitch / 2) { $('hint').textContent = HINTS[state.view] || ''; return; }
+    const j = Math.max(0, Math.min(plan.n - 1, Math.floor(y / plan.dy)));
+    let near = null;
+    for (const [b, kn] of r.knots.entries()) if (Math.abs(kn.y - y) < Math.max(plan.s.pitch * 0.45, 6)) near = { b, kn };
+    let t = `ribbon ${i + 1} · ${lenTxt(y)} from the top · angle ${mod180(r.th[j]).toFixed(0)}° · lightness ${(100 * r.L[j]).toFixed(0)} (target ${(100 * r.Lt[j]).toFixed(0)})`;
+    if (near) {
+      const turn = near.b ? near.kn.a - r.knots[near.b - 1].a : 0;
+      const kind = near.b === 0 ? 'top bar' : near.b === r.knots.length - 1 ? 'bottom bar' : `bracket ${near.b}`;
+      t = `ribbon ${i + 1}, ${kind} at ${lenTxt(near.kn.y)}: slot ${mod180(near.kn.a).toFixed(1)}°` +
+        (near.b ? `, turned ${Math.abs(turn).toFixed(1)}° ${turn >= 0 ? 'clockwise' : 'counterclockwise'} (from above) since the one before` : '');
+    }
+    $('hint').textContent = t;
+  });
+  $('view').addEventListener('mouseleave', () => { if (state.view !== 'distance') $('hint').textContent = HINTS[state.view] || ''; });
+}
+
+// ------------------------------------------------------------------ stats
+function setStat(id, text, cls = '') { const el = $(id); el.textContent = text; el.className = cls; }
+
+function updateStats() {
+  const plan = state.plan;
+  if (!plan) return;
+  const st = plan.stats;
+  setStat('statRibbons', String(st.ribbons));
+  setStat('statPiece', `${L(plan.piece.W)} × ${L(plan.piece.H)} ${unitLabel()}`);
+  setStat('statBrackets', plan.rows ? `${st.brackets} (${st.rows} rows)` : String(st.brackets));
+  setStat('statTone', st.tone.toFixed(1), st.tone > 8 ? 'warn' : '');
+  setStat('statSeen', `${st.seen.toFixed(1)} (${st.seenIdeal.toFixed(1)})`, st.seen > 5 ? 'warn' : '');
+  setStat('statRate', `${Math.round(st.rateUse * 100)}%`, st.rateUse > 1 + 1e-6 ? 'bad' : '');
+}
+
+
+
+/** The plan's notes, plus the comb check (settings may have changed since the solve). */
+function updateNotes() {
+  const plan = state.plan;
+  const items = plan ? plan.notes.slice() : [];
+  let combMsg = '';
+  if (plan && plan.rows) {
+    const c = planCombs({ ...plan, s: { ...plan.s, ...fabSettings() } });
+    combMsg = `${c.pieces.length} comb pieces · least web between slots ${lenTxt(c.web)}`;
+    if (c.web < state.set.minWeb) items.push(`neighbouring comb slots come ${lenTxt(c.web)} apart, under the least web (${lenTxt(state.set.minWeb)}): widen the pitch`);
+  } else if (plan) {
+    combMsg = 'each ribbon has its own heights: wall pins, no combs';
+  }
+  $('combNote').textContent = combMsg;
+  $('notes').innerHTML = items.map((t) => `<li>${escapeHtml(t)}</li>`).join('');
+  $('exportCombsSVG').disabled = $('exportCombsDXF').disabled = !(plan && plan.rows);
+}
+
+const fabSettings = () => Object.fromEntries([...FAB_ONLY].map((k) => [k, state.set[k]]));
+
+// ------------------------------------------------------------------ exports
+function downloadFile(text, filename, type) {
+  const blob = text instanceof Blob ? text : new Blob([text], { type });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = filename;
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+const base = () => `${state.imageName}-ribbons`;
+
+function bindExports() {
+  const combSheet = () => {
+    const plan = state.plan;
+    return stackPieces(planCombs({ ...plan, s: { ...plan.s, ...fabSettings() } }).pieces);
+  };
+  $('exportCombsSVG').addEventListener('click', () => { if (state.plan?.rows) downloadFile(piecesSVG(combSheet(), `${base()} combs`), `${base()}-combs.svg`, 'image/svg+xml'); });
+  $('exportCombsDXF').addEventListener('click', () => { if (state.plan?.rows) downloadFile(piecesDXF(combSheet()), `${base()}-combs.dxf`, 'application/dxf'); });
+  $('exportCSV').addEventListener('click', () => { if (state.plan) downloadFile(bracketCSV(state.plan, state.set.units), `${base()}-brackets.csv`, 'text/csv'); });
+  $('exportTemplate').addEventListener('click', () => { if (state.plan) downloadFile(wallTemplateSVG(state.plan), `${base()}-wall-template.svg`, 'image/svg+xml'); });
+  $('exportJson').addEventListener('click', () => {
+    if (!state.plan) return;
+    const p = state.plan;
+    const out = {
+      app: 'RibbonTone', piece: p.piece, layout: p.layout, hold: p.hold, rows: p.rows, stats: p.stats, notes: p.notes,
+      settings: { ...p.s, curve: p.s.curveOn ? p.s.curve : '' },
+      ribbons: p.ribbons.map((r, i) => ({ ribbon: i + 1, x: r.x, brackets: r.knots.map((k) => ({ y: +k.y.toFixed(2), angle: +k.a.toFixed(2), slot: +mod180(k.a).toFixed(2) })) })),
+    };
+    downloadFile(JSON.stringify(out, null, 1), `${base()}-plan.json`, 'application/json');
+  });
+  $('exportPng').addEventListener('click', () => {
+    if (!state.plan) return;
+    const p = state.plan, k = 2400 / Math.max(p.piece.W, p.piece.H);
+    const c = document.createElement('canvas');
+    c.width = Math.round(p.piece.W * k); c.height = Math.round(p.piece.H * k);
+    const g = c.getContext('2d');
+    g.setTransform(k, 0, 0, k, 0, 0);
+    drawView(g, p, state.view === 'distance' ? 'preview' : state.view, k);
+    c.toBlob((b) => downloadFile(b, `${base()}-${state.view}.png`, 'image/png'));
+  });
+  const cal = () => stackPieces(calibrationCombs({ ...state.set }, parseFloat($('calStep').value)).pieces);
+  $('calSVG').addEventListener('click', () => downloadFile(piecesSVG(cal(), 'RibbonTone calibration combs'), 'ribbontone-calibration-combs.svg', 'image/svg+xml'));
+  $('calDXF').addEventListener('click', () => downloadFile(piecesDXF(cal()), 'ribbontone-calibration-combs.dxf', 'application/dxf'));
+}
+
+// ------------------------------------------------------------------- image
+function loadImage(url, maxDim = 3000) {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.onload = () => {
+      const sc = Math.min(1, maxDim / Math.max(img.naturalWidth, img.naturalHeight));
+      const w = Math.max(1, Math.round(img.naturalWidth * sc)), h = Math.max(1, Math.round(img.naturalHeight * sc));
+      const c = document.createElement('canvas');
+      c.width = w; c.height = h;
+      const ctx = c.getContext('2d');
+      ctx.drawImage(img, 0, 0, w, h);
+      resolve({ width: w, height: h, data: ctx.getImageData(0, 0, w, h).data });
+    };
+    img.onerror = () => reject(new Error('could not read that image'));
+    img.src = url;
+  });
+}
+
+function setImage(rgba, name, src) {
+  state.rgba = rgba;
+  state.imageName = name;
+  state.imageSrc = src;
+  updateLum();
+  updatePieceNote();
+  run();
+}
+
+function updateLum() {
+  if (!state.rgba) return;
+  state.lum = toneLuminance(state.rgba, state.set.gamma, state.set.brightness);
+  state.targetCanvas = null;
+}
+
+async function loadSample(kind) {
+  if (kind === 'rhino') {
+    try { setImage(await loadImage('assets/rhino.jpg'), 'rhino', { kind: 'sample', name: 'rhino' }); return; } catch { kind = 'sphere'; }
+  }
+  setImage(generateSample(kind).gray, kind, { kind: 'sample', name: kind });
+}
+
+function bindImage() {
+  const drop = $('drop');
+  drop.addEventListener('click', () => $('file').click());
+  drop.addEventListener('dragover', (e) => { e.preventDefault(); drop.classList.add('over'); });
+  drop.addEventListener('dragleave', () => drop.classList.remove('over'));
+  drop.addEventListener('drop', (e) => {
+    e.preventDefault();
+    drop.classList.remove('over');
+    const f = e.dataTransfer.files[0];
+    if (f) openFile(f);
+  });
+  $('file').addEventListener('change', () => { const f = $('file').files[0]; if (f) openFile(f); $('file').value = ''; });
+  for (const b of document.querySelectorAll('[data-sample]')) b.addEventListener('click', () => loadSample(b.dataset.sample));
+}
+
+async function openFile(f) {
+  try {
+    // the original bytes, kept for projects: a re-encode could shift the samples
+    const dataURL = await new Promise((res, rej) => {
+      const r = new FileReader();
+      r.onload = () => res(r.result);
+      r.onerror = () => rej(new Error('could not read that file'));
+      r.readAsDataURL(f);
+    });
+    setImage(await loadImage(dataURL), f.name.replace(/\.[^.]+$/, '') || 'ribbons', { kind: 'file', name: f.name, dataURL });
+  } catch (err) {
+    setStatus(err.message, 'bad');
+  }
+}
+
+// ----------------------------------------------------------------- projects
+function bindProjects() {
+  $('resetAll').addEventListener('click', () => {
+    if (!window.confirm('Reset every control to its default?\n\nThe image stays.')) return;
+    state.set = { ...DEFAULTS };
+    showFields();
+    updateLum();
+    updatePieceNote();
+    $('zoom').value = '1';
+    setView('preview');
+    run();
+    setStatus('every control reset to its default');
+  });
+  $('saveProject').addEventListener('click', () => {
+    if (!state.imageSrc) return;
+    downloadFile(projectJSON({ image: state.imageSrc, settings: state.set }), `${state.imageName}.rtone.json`, 'application/json');
+  });
+  $('openProject').addEventListener('click', () => $('projectFile').click());
+  $('projectFile').addEventListener('change', async () => {
+    const f = $('projectFile').files[0];
+    $('projectFile').value = '';
+    if (!f) return;
+    try {
+      const { project, problems } = parseProject(await f.text());
+      state.set = { ...project.settings };
+      showFields();
+      const im = project.image;
+      if (im && im.kind === 'sample') await loadSample(im.name);
+      else if (im) setImage(await loadImage(im.dataURL), im.name.replace(/\.[^.]+$/, '') || 'ribbons', im);
+      else { updateLum(); run(); }
+      if (problems.length) setStatus(`project opened (with problems: ${problems.join('; ')})`, 'warn');
+    } catch (err) {
+      setStatus(`could not open the project: ${err.message}`, 'bad');
+    }
+  });
+}
+
+// ------------------------------------------------------------------- misc
+function setStatus(text, cls = '') {
+  const el = $('status');
+  el.textContent = text;
+  el.className = cls;
+}
+
+function escapeHtml(s) {
+  return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}
+
+function setView(v) {
+  state.view = v;
+  for (const b of document.querySelectorAll('#viewSeg button')) b.setAttribute('aria-pressed', String(b.dataset.view === v));
+  paint();
+}
+
+function bindViews() {
+  for (const b of document.querySelectorAll('#viewSeg button')) b.addEventListener('click', () => setView(b.dataset.view));
+  let distTimer = null;
+  $('distView').addEventListener('input', () => { $('distViewVal').textContent = `${$('distView').value} m`; clearTimeout(distTimer); distTimer = setTimeout(paint, 80); });
+  $('distCompare').addEventListener('change', paint);
+  $('zoom').addEventListener('change', paint);
+  let resizeTimer = null;
+  window.addEventListener('resize', () => { clearTimeout(resizeTimer); resizeTimer = setTimeout(paint, 120); });
+}
+
+function init() {
+  restore();
+  bindFields();
+  showFields();
+  bindProjects();
+  bindViews();
+  bindHover();
+  bindExports();
+  bindImage();
+  updatePieceNote();
+  loadSample('sphere');
+}
+
+init();

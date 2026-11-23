@@ -1,0 +1,82 @@
+# RibbonTone architecture
+
+Same layering as HalftoneCuttable and Photo2Mosaic (standalone copies, no
+cross-folder imports): `src/core/` is DOM-free maths, `src/pipeline.js` chains
+it, `src/worker.js` runs the pipeline off the main thread, `src/app.js` is the
+only DOM file. The harness (`verify.html`, `run-tests.ps1`) runs the core and
+pipeline directly.
+
+## Conventions
+
+- Millimetres and degrees inside; inches only at the UI edge.
+- y runs down from the top bar (y = 0) to the fixed bottom bar (y = H).
+- A ribbon's angle θ is its face normal's direction in the horizontal plane:
+  0 = facing the viewer, + = face turned to the viewer's right (clockwise
+  seen from above). Both faces are white, so θ and θ + 180° look alike and one
+  slot holds both. Angles in the plan are unwrapped, so consecutive brackets
+  give the twist's size and direction.
+
+## Pipeline
+
+1. **Tone** (`core/units.js`): gamma and brightness → linear luminance.
+2. **Piece** (`pieceGeometry`): the image covers W × H; ribbons centred at the pitch.
+3. **Columns** (`core/target.js`): each ribbon's box [x ± p/2] × [y, y + dy],
+   averaged in linear light from a summed-area table (exact on constant pixels).
+4. **Brightness over a half turn** (`core/optics.js`), per ribbon, as a LUT:
+   `Y = c·F + (1 − c)·Ybg` with coverage `c = (w|cos(θ−α)| + t|sin(θ−α)|)/(p cos α)`,
+   face `F` = Lambert under a directional light plus ambient, plus a satin
+   Blinn-Phong sheen. α is the direction to the viewer from that ribbon. A
+   measured curve (`angle value` lines from the calibration combs) can replace it.
+   Near edge-on an unlit face is darker than the backdrop, so the darkest angle
+   comes a few degrees before 90°.
+5. **Reachable range**: the image is mapped, in lightness (∛Y), onto
+   [max of the ribbons' minima, min of their maxima]; contrast stretches first.
+6. **Twist mechanics** (`core/twist.js`):
+   - rate limit `κmax = (2/w)·√(2ε)` from the edge strain ε
+     (0.55 % at 20 mm → 90° per 150 mm);
+   - between brackets one torque runs down the span, `dθ/dy = M/k(y)`,
+     `k = G·w·t³/3 + T(y)·w²/12`, `T(y) = T0 + λg(H − y)`, so the twist crowds
+     toward each span's bottom and the limit applies to the **peak** rate;
+   - coiling check: torque against 2√(B·T), B = E·w·t³/12.
+7. **Solver** (`core/solve.js`), three exact dynamic programs:
+   - *ideal path*: Viterbi over θ mod 180° (≤ 1° states), each sample turning at
+     most κmax·dy either way. It is the best any bracket layout can do (the
+     Ideal view) and guides the next two;
+   - *bracket heights*: shortest path over a grid of candidate heights, spans
+     within [least spacing, longest span], span cost = tone error of a ribbon
+     running between the ideal path's end values along the tension profile; a
+     price per bracket is bisected until the count fits. Shared rows sum every
+     ribbon's span costs; per-ribbon heights run it per ribbon;
+   - *bracket angles*: Viterbi over each bracket's angle (±30° around the ideal
+     path, 1° steps) with the exact span cost, allowing a transition only if
+     the span's peak rate is within κmax. Twist directions fall out of it.
+   Ribbons are solved left to right; each passes a share ("Spread error") of
+   its vertically blurred lightness error to the next, which the eye mixes.
+8. **Stats**: tone error (lightness ×100, sample by sample) and "as seen"
+   (after mixing neighbours 1:2:1 and a pitch down the ribbon), with the ideal
+   path's for comparison; brackets; the worst span's peak rate and coil ratio.
+
+## Views and files
+
+- Preview / Ideal: `core/render.js` projects each slice's ends onto the wall
+  plane from the eye, shades the visible face, and ray-casts shadows from the
+  ribbons two either side. The app fills each ribbon as one gradient polygon,
+  farthest from the viewer first; the brightest face is white.
+- Fabrication (`core/fab.js`): comb rows (slots along (cos θ, −sin θ) seen from
+  above, FRONT at the viewer's edge, split at midpoints between ribbons to fit
+  the cutter bed, optional centre split), the bracket list CSV (slot angle and
+  signed turn since the bracket above), a 1:1 wall template, the calibration
+  combs. SVG and DXF (R12, y flipped) from the same shapes.
+
+## Verification
+
+`run-tests.ps1` (port 8098) runs `verify.html` headless: optics, twist, target
+sampling, the three DPs (two against brute force / exhaustive search), the
+renderer's projections and shadows, fabrication geometry (including SVG/DXF
+angle agreement), projects, and the pipeline's limits and layouts.
+
+## Deferred
+
+Heat-set jigs, 3D-printed ribbons (a continuous-profile mode: the ideal path is
+already it), plastically twisted metal strips, several viewpoints at once,
+colour, a photo reader for the calibration curve, shadows across slices.
