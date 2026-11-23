@@ -29,6 +29,14 @@ pipeline directly.
    measured curve (`angle value` lines from the calibration combs) can replace it.
    Near edge-on an unlit face is darker than the backdrop, so the darkest angle
    comes a few degrees before 90°.
+   The backdrop's share is darkened by the ribbons' own shadows on it
+   (`backdropLit`): on the box's back wall (half a comb depth behind, or the pin
+   stand-off), each ribbon's cross-section dropped along the light is an
+   interval per pitch; the part of the visible gap it covers keeps only ambient
+   light. Negligible on black, large on white.
+   **Dark ribbons on a white backdrop** is the same model with the two
+   reflectances swapped (the toggle swaps them; material presets then give a
+   dyed-black ribbon, 0.05): face-on is now the darkest angle.
 5. **Reachable range**: the image is mapped, in lightness (∛Y), onto
    [max of the ribbons' minima, min of their maxima]; contrast stretches first.
 6. **Twist mechanics** (`core/twist.js`):
@@ -87,7 +95,15 @@ viewer, ribbons' centre lines at z = 0.
 - Box: back, sides, top and bottom, open at the front. Its depth is the combs';
   the combs mount to its sides; with pins the back wall is the stand-off away.
 - Shading is the optics model (Lambert + sheen, same light, same exposure), so
-  the design-viewpoint preset matches the 2D Preview. No shadows yet.
+  the design-viewpoint preset matches the 2D Preview.
+- Shadows: a shadow map (RGBA-packed depth, WebGL 1), orthographic from the
+  light over the scene's bounds, 3 × 3 samples, a normal offset of 1.5 texels
+  so the thin ribbons do not shadow themselves. Only direct light and sheen are
+  shadowed. Redrawn when the scene, light or casters change, not per frame.
+  Clear combs cast none.
+- What the 3D view shows that the solver does not model: the COMBS' shadows. A
+  solid comb, lit from above, shades a band of ribbon and backdrop below it
+  (about (D/2 − z)·Ly/Lz deep). Clear combs avoid most of it.
 - A WebGL canvas cannot be a 2D canvas too, so the 3D view has its own canvas.
   Headless checks need `--use-angle=swiftshader --enable-unsafe-swiftshader`.
 
@@ -103,5 +119,5 @@ angle agreement), projects, and the pipeline's limits and layouts.
 Heat-set jigs, 3D-printed ribbons (a continuous-profile mode: the ideal path is
 already it), plastically twisted metal strips, several viewpoints at once,
 colour, a photo reader for the calibration curve, shadows across slices.
-3D view: shadows (a shadow map), hover picking, a walk-by slider, an assembly
+3D view: hover picking, a walk-by slider, an assembly
 slider, a section plane, OBJ export, cutting files for the pin tabs.

@@ -1,7 +1,7 @@
 # RibbonTone
 
 Turns an image into a buildable halftone made of hanging, twisted white ribbons
-on a black background. A ribbon turned to face you covers most of its pitch and
+on a black background (or dark ribbons on a white one: a single toggle). A ribbon turned to face you covers most of its pitch and
 reads light; turned edge-on it all but vanishes. Twisting each ribbon down its
 length draws the image's tone.
 
@@ -34,7 +34,7 @@ or Edge), or open http://localhost:8080/verify.html.
 
 The whole piece in 3D (WebGL): ribbons, the combs as solid or clear prisms (or,
 with wall pins, slotted tabs on stand-off rods), and an optional black box
-around the back, sides, top and bottom. Drag to orbit, right-drag to pan, wheel
+around the back, sides, top and bottom, with shadows. Drag to orbit, right-drag to pan, wheel
 or pinch to zoom. Presets include the design viewpoint, which matches the Preview.
 
 ## Outputs

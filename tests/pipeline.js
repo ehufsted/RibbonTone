@@ -62,4 +62,13 @@ export function run() {
   const msg = (over) => { try { runPipeline(detail, { ...plain, ...over }); return ''; } catch (e) { return e.message; } };
   check('row spacing 0: a message, not "Invalid array length"', /row spacing/.test(msg({ rowSpacing: 0 })), msg({ rowSpacing: 0 }));
   check('pitch 0: a message', /pitch/.test(msg({ pitch: 0 })), msg({ pitch: 0 }));
+
+  section('pipeline: dark ribbons on white', 'The same solver with the reflectances swapped: now a dark part of the image wants a ' +
+    'ribbon face-on and a light part wants it edge-on, the reverse of white on black.');
+  const dk = runPipeline(vRamp(40, 80), { ...plain, darkRibbons: true, reflectance: 0.05, bgReflectance: 0.85 });
+  const rd = dk.ribbons[4];
+  // (the image's near-black top rows map a little above the darkest lightness, so "face-on" is within 25°)
+  check('dark ramp top (black) is near face-on, its bottom (white) near edge-on', offFace(rd.th[2]) < 25 && offFace(rd.th[dk.n - 3]) > 70,
+    `${num(offFace(rd.th[2]), 1)}° → ${num(offFace(rd.th[dk.n - 3]), 1)}°`);
+  check('dark scheme: still within the rate limit, tone error small', dk.stats.rateUse <= 1 + 1e-9 && dk.stats.tone < 3, `rate ${num(dk.stats.rateUse * 100, 1)}%, tone ${num(dk.stats.tone, 2)}`);
 }

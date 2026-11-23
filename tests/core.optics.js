@@ -1,5 +1,5 @@
 import { section, check, num, plain } from './runner.js';
-import { pitchModel, backdropY, viewAngle, parseCurve, curveAt, ribbonLUT, lutAt } from '../src/core/optics.js';
+import { pitchModel, backdropY, viewAngle, parseCurve, curveAt, ribbonLUT, lutAt, backdropLit, backdropDistance } from '../src/core/optics.js';
 
 export function run() {
   section('core.optics', 'One pitch\'s brightness: coverage times face plus backdrop. Front light, no sheen, ' +
@@ -46,4 +46,26 @@ export function run() {
   check('photo readings are linearized: 255 → 1, 128 → about 0.216', ph.photo && Math.abs(curveAt(ph.pts, 0) - 1) < 1e-9 && Math.abs(curveAt(ph.pts, 45) - 0.2158) < 1e-3, `${num(curveAt(ph.pts, 45), 4)}`);
   const bad = parseCurve('zero one');
   check('a curve with no points is refused with a reason', bad.pts === null && bad.problems.length > 0, bad.problems.join('; '));
+
+  section('core.optics: shadows on the backdrop', 'Each ribbon\'s shadow on the backdrop (the box\'s back wall, half a comb depth ' +
+    'behind) is its cross-section dropped along the light. Lit from where the viewer stands, every shadow hides behind its own ribbon; ' +
+    'from the side, shadows show in the gaps. Edge-on, a ribbon\'s shadow is a sliver.');
+  const L = (az, el = 0) => [Math.cos(el * Math.PI / 180) * Math.sin(az * Math.PI / 180), Math.cos(el * Math.PI / 180) * Math.cos(az * Math.PI / 180)];
+  const ws = { ...plain, slotClear: 0.6, combMargin: 8 };
+  check('combs: the backdrop is half a comb depth behind (18.3 mm)', Math.abs(backdropDistance(ws) - 18.3) < 1e-9 && backdropDistance({ ...ws, hold: 'pins', standoff: 45 }) === 45);
+  check('light from the viewer\'s direction: no shadow shows', backdropLit(0, 0, ws, ...L(0)) === 1 && Math.abs(backdropLit(30, 20, ws, ...L(20)) - 1) < 1e-12);
+  // by hand, face-on: ribbons cover [−10, 10] of every 30 mm, the gap is [10, 20]; the shadows are the
+  // same 20 mm shifted left by 18.3·tan(az) -- at 15° that is 4.90 mm, so they cover [15.10, 20] of the gap
+  const sideLit = backdropLit(0, 0, ws, ...L(15));
+  check('light 15° to the side, face-on: 18.3·tan 15° = 4.90 mm of the 10 mm gap is shaded', Math.abs((1 - sideLit) * 10 - 18.3 * Math.tan(15 * Math.PI / 180)) < 1e-9,
+    `${num((1 - sideLit) * 10, 3)} mm`);
+  check('at 40° the shifted shadows (20 mm each) cover the whole 10 mm gap', backdropLit(0, 0, ws, ...L(40)) === 0);
+  check('edge-on to the viewer is broadside to a side light: a wide shadow', backdropLit(90, 0, ws, ...L(40)) < 0.6, `lit ${num(backdropLit(90, 0, ws, ...L(40)), 3)}`);
+  check('a ribbon lying along a 40° light casts only a sliver', backdropLit(-50, 0, ws, ...L(40)) > 0.97, `lit ${num(backdropLit(-50, 0, ws, ...L(40)), 3)}`);
+  const white = { ...ws, reflectance: 0.05, bgReflectance: 0.85, lightAz: 40, ambient: 0.2 };
+  check('a white backdrop: the shadow darkens the pitch', pitchModel(0, 0, white).Y < pitchModel(0, 0, { ...white, combMargin: -10.3 }).Y,
+    `${num(pitchModel(0, 0, white).Y, 3)} with the backdrop 18.3 mm back, ${num(pitchModel(0, 0, { ...white, combMargin: -10.3 }).Y, 3)} right behind`);
+  const dark = { ...plain, reflectance: 0.05, bgReflectance: 0.85 };
+  check('dark ribbons on white: face-on is the darkest, edge-on the lightest', pitchModel(0, 0, dark).Y < pitchModel(45, 0, dark).Y && pitchModel(45, 0, dark).Y < pitchModel(88, 0, dark).Y,
+    `${num(pitchModel(0, 0, dark).Y, 3)} < ${num(pitchModel(45, 0, dark).Y, 3)} < ${num(pitchModel(88, 0, dark).Y, 3)}`);
 }

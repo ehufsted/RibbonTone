@@ -9,7 +9,18 @@
 // Preview: albedo × (ambient + (1 − ambient)·max(0, n·L)) plus a Blinn-Phong
 // sheen, divided by the same exposure (the brightest face), sRGB-encoded.
 // Every surface is lit on the side the eye sees (ribbons are white on both
-// faces). No shadows yet.
+// faces).
+//
+// SHADOWS: a shadow map. The solid things (ribbons, solid combs and tabs,
+// rods, the box) are drawn from the light, orthographically over the scene,
+// into a depth texture -- packed into RGBA, as WebGL 1 need not have depth
+// textures. A point is lit where it is no deeper than the map, sampled 3 x 3
+// for soft edges, and only the direct light and the sheen are shadowed (the
+// ambient stays). The ribbons are thinner than a texel, so the point is
+// first pushed off its face toward the light by about a texel (a normal
+// offset) or every ribbon would shadow itself. The map is redrawn only when
+// the scene, the light or what casts changes, not as the camera moves. Clear
+// combs cast none (they would, faintly).
 //
 // ORDER: solid things with the depth buffer (ribbons, box, rods, solid combs
 // and tabs), then the slot outlines, then clear combs and tabs blended without
@@ -29,16 +40,48 @@ varying vec3 vPos;
 varying vec3 vNrm;
 uniform vec3 uEye, uL, uAlbedo;
 uniform float uAmb, uSheen, uGloss, uExposure, uAlpha;
+uniform mat4 uLightMVP;
+uniform sampler2D uShadowMap;
+uniform float uShadowOn, uTexel, uNormalBias, uBias;
 float enc(float c) { c = clamp(c, 0.0, 1.0); return c <= 0.0031308 ? 12.92 * c : 1.055 * pow(c, 1.0 / 2.4) - 0.055; }
+float unpack(vec4 c) { return dot(c, vec4(1.0, 1.0 / 255.0, 1.0 / 65025.0, 1.0 / 16581375.0)); }
+float lightAt(vec3 p, vec3 n) {
+  vec4 q = uLightMVP * vec4(p + n * uNormalBias, 1.0);
+  vec3 c = q.xyz / q.w * 0.5 + 0.5;
+  if (c.x < 0.0 || c.x > 1.0 || c.y < 0.0 || c.y > 1.0 || c.z > 1.0) return 1.0;
+  float s = 0.0;
+  for (int i = -1; i <= 1; i++) {
+    for (int j = -1; j <= 1; j++) {
+      float d = unpack(texture2D(uShadowMap, c.xy + vec2(float(i), float(j)) * uTexel));
+      s += c.z - uBias > d ? 0.0 : 1.0;
+    }
+  }
+  return s / 9.0;
+}
 void main() {
   vec3 n = normalize(vNrm);
   vec3 V = normalize(uEye - vPos);
   if (dot(n, V) < 0.0) n = -n;
-  vec3 c = uAlbedo * (uAmb + (1.0 - uAmb) * max(dot(n, uL), 0.0));
-  if (uSheen > 0.0) c += uSheen * pow(max(dot(n, normalize(uL + V)), 0.0), uGloss);
+  float nl = max(dot(n, uL), 0.0);
+  float sh = (uShadowOn > 0.5 && nl > 0.0) ? lightAt(vPos, n) : 1.0;
+  vec3 c = uAlbedo * (uAmb + (1.0 - uAmb) * nl * sh);
+  if (uSheen > 0.0) c += sh * uSheen * pow(max(dot(n, normalize(uL + V)), 0.0), uGloss);
   c /= uExposure;
   gl_FragColor = vec4(enc(c.r), enc(c.g), enc(c.b), uAlpha);
 }`;
+
+const DEPTH_VS = `
+attribute vec3 aPos;
+uniform mat4 uMVP;
+void main() { gl_Position = uMVP * vec4(aPos, 1.0); }`;
+
+const DEPTH_FS = `
+precision highp float;
+vec4 pack(float d) {
+  vec4 e = fract(vec4(1.0, 255.0, 65025.0, 16581375.0) * d);
+  return e - e.yzww * vec4(1.0 / 255.0, 1.0 / 255.0, 1.0 / 255.0, 0.0);
+}
+void main() { gl_FragColor = pack(gl_FragCoord.z); }`;
 
 const LINE_VS = `
 attribute vec3 aPos;
@@ -74,6 +117,13 @@ function compile(gl, vs, fs) {
 }
 
 // ------------------------------------------------------------ matrices (column-major)
+function ortho(l, r, b, t, n, f) {
+  return new Float32Array([2 / (r - l), 0, 0, 0, 0, 2 / (t - b), 0, 0, 0, 0, -2 / (f - n), 0, -(r + l) / (r - l), -(t + b) / (t - b), -(f + n) / (f - n), 1]);
+}
+
+/** A point through a column-major matrix (w = 1), without the divide. */
+const apply = (m, p) => [0, 1, 2].map((r) => m[r] * p[0] + m[4 + r] * p[1] + m[8 + r] * p[2] + m[12 + r]);
+
 function perspective(fovy, aspect, near, far) {
   const f = 1 / Math.tan(fovy / 2), nf = 1 / (near - far);
   return new Float32Array([f / aspect, 0, 0, 0, 0, f, 0, 0, 0, 0, (far + near) * nf, -1, 0, 0, 2 * far * near * nf, 0]);
@@ -135,8 +185,24 @@ export function preset(name, scene, view, aspect) {
 export function createView3D(canvas) {
   const gl = canvas.getContext('webgl', { antialias: true, preserveDrawingBuffer: true });
   if (!gl) return null;
-  const lit = compile(gl, VS, FS), line = compile(gl, LINE_VS, LINE_FS);
+  const lit = compile(gl, VS, FS), line = compile(gl, LINE_VS, LINE_FS), depth = compile(gl, DEPTH_VS, DEPTH_FS);
   let buffers = null, scene = null;
+  // the shadow map: an RGBA texture holding packed depth, and its framebuffer
+  const SIZE = Math.min(4096, gl.getParameter(gl.MAX_TEXTURE_SIZE), gl.getParameter(gl.MAX_RENDERBUFFER_SIZE));
+  const shadowTex = gl.createTexture();
+  gl.bindTexture(gl.TEXTURE_2D, shadowTex);
+  gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, SIZE, SIZE, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
+  for (const [k, v] of [[gl.TEXTURE_MIN_FILTER, gl.NEAREST], [gl.TEXTURE_MAG_FILTER, gl.NEAREST], [gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE], [gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE]]) gl.texParameteri(gl.TEXTURE_2D, k, v);
+  const shadowRB = gl.createRenderbuffer();
+  gl.bindRenderbuffer(gl.RENDERBUFFER, shadowRB);
+  gl.renderbufferStorage(gl.RENDERBUFFER, gl.DEPTH_COMPONENT16, SIZE, SIZE);
+  const shadowFB = gl.createFramebuffer();
+  gl.bindFramebuffer(gl.FRAMEBUFFER, shadowFB);
+  gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, shadowTex, 0);
+  gl.framebufferRenderbuffer(gl.FRAMEBUFFER, gl.DEPTH_ATTACHMENT, gl.RENDERBUFFER, shadowRB);
+  const shadowOK = gl.checkFramebufferStatus(gl.FRAMEBUFFER) === gl.FRAMEBUFFER_COMPLETE;
+  gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+  let shadowKey = '', shadow = null;   // shadow: {mvp, texelWorld, depthRange}
   const view = { cam: null, opts: null };
 
   const upload = (m) => {
@@ -165,6 +231,45 @@ export function createView3D(canvas) {
       ribbons: upload(sc.ribbons), box: upload(sc.box), tabs: upload(sc.tabs), rods: upload(sc.rods),
       combs: sc.combs.map(upload), lines,
     };
+    shadowKey = '';
+  }
+
+  /** Draw the casters' depth from the light: orthographic, fitted to the scene's bounds seen from the light. */
+  function drawShadowMap(o) {
+    const b = scene.bounds, Ld = o.light;
+    const c = [(b.x0 + b.x1) / 2, (b.y0 + b.y1) / 2, (b.z0 + b.z1) / 2];
+    const R = Math.hypot(b.x1 - b.x0, b.y1 - b.y0, b.z1 - b.z0);
+    const up = Math.abs(Ld[1]) > 0.99 ? [0, 0, -1] : [0, 1, 0];
+    const view = lookAt([c[0] + Ld[0] * R, c[1] + Ld[1] * R, c[2] + Ld[2] * R], c, up);
+    let x0 = Infinity, x1 = -Infinity, y0 = Infinity, y1 = -Infinity, z0 = Infinity, z1 = -Infinity;
+    for (const x of [b.x0, b.x1]) for (const y of [b.y0, b.y1]) for (const z of [b.z0, b.z1]) {
+      const q = apply(view, [x, y, z]);
+      x0 = Math.min(x0, q[0]); x1 = Math.max(x1, q[0]); y0 = Math.min(y0, q[1]); y1 = Math.max(y1, q[1]); z0 = Math.min(z0, q[2]); z1 = Math.max(z1, q[2]);
+    }
+    const pad = 2;
+    const mvp = mul(ortho(x0 - pad, x1 + pad, y0 - pad, y1 + pad, -z1 - pad, -z0 + pad), view);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, shadowFB);
+    gl.viewport(0, 0, SIZE, SIZE);
+    gl.clearColor(1, 1, 1, 1);
+    gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+    gl.enable(gl.DEPTH_TEST);
+    gl.disable(gl.BLEND);
+    gl.disable(gl.CULL_FACE);
+    gl.depthMask(true);
+    gl.useProgram(depth.p);
+    gl.uniformMatrix4fv(depth.loc.uMVP, false, mvp);
+    const casters = [buffers.ribbons, buffers.rods];
+    if (o.box.on) casters.push(buffers.box);
+    if (o.comb.look !== 'clear') casters.push(...buffers.combs, buffers.tabs);
+    for (const bf of casters) {
+      if (!bf) continue;
+      gl.bindBuffer(gl.ARRAY_BUFFER, bf.pos);
+      gl.enableVertexAttribArray(depth.loc.aPos); gl.vertexAttribPointer(depth.loc.aPos, 3, gl.FLOAT, false, 0, 0);
+      gl.drawArrays(gl.TRIANGLES, 0, bf.count);
+    }
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+    const texelWorld = Math.max(x1 - x0, y1 - y0) / SIZE;
+    shadow = { mvp, texelWorld, depthRange: z1 - z0 + 2 * pad };
   }
 
   /**
@@ -191,6 +296,15 @@ export function createView3D(canvas) {
     const up = Math.abs(cam.pitch) > 88 * RAD ? [0, 0, -1] : [0, 1, 0];
     const mvp = mul(perspective(cam.fov, canvas.width / canvas.height, near, far), lookAt(eye, cam.target, up));
 
+    const shadowsOn = !!o.shadows && shadowOK;
+    if (shadowsOn) {
+      const key = [o.light.join(','), o.box.on, o.comb.look].join('|');
+      if (key !== shadowKey) { drawShadowMap(o); shadowKey = key; }
+      gl.viewport(0, 0, canvas.width, canvas.height);
+      gl.clearColor(bg[0], bg[1], bg[2], 1);
+      gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+    }
+
     gl.enable(gl.DEPTH_TEST);
     gl.disable(gl.BLEND);
     gl.disable(gl.CULL_FACE);
@@ -202,6 +316,16 @@ export function createView3D(canvas) {
     gl.uniform3fv(L.uL, o.light);
     gl.uniform1f(L.uAmb, o.ambient);
     gl.uniform1f(L.uExposure, o.exposure);
+    gl.uniform1f(L.uShadowOn, shadowsOn ? 1 : 0);
+    gl.activeTexture(gl.TEXTURE0);
+    gl.bindTexture(gl.TEXTURE_2D, shadowTex);
+    gl.uniform1i(L.uShadowMap, 0);
+    if (shadowsOn) {
+      gl.uniformMatrix4fv(L.uLightMVP, false, shadow.mvp);
+      gl.uniform1f(L.uTexel, 1 / SIZE);
+      gl.uniform1f(L.uNormalBias, 1.5 * shadow.texelWorld);
+      gl.uniform1f(L.uBias, (0.5 * shadow.texelWorld) / shadow.depthRange);
+    }
     const draw = (bf, albedo, sheen, gloss, alpha) => {
       if (!bf) return;
       gl.uniform3fv(L.uAlbedo, albedo);

@@ -33,12 +33,14 @@ const LEN = ['widthMm', 'heightMm', 'ribbonW', 'pitch', 'thickness', 'viewXMm', 
 const NUM = ['reflectance', 'sheen', 'gloss', 'strainPct', 'tensionN', 'density', 'G', 'E', 'bgReflectance', 'distM', 'maxRows', 'maxPerRibbon'];
 const RANGE = { gamma: (v) => v.toFixed(2), brightness: (v) => v.toFixed(2), contrast: (v) => v.toFixed(2),
   lightAz: (v) => `${v}°`, lightEl: (v) => `${v}°`, ambient: (v) => v.toFixed(2), diffusion: (v) => v.toFixed(2) };
-const CHECK = ['curveOn', 'splitComb', 'box3d'];
+const CHECK = ['curveOn', 'splitComb', 'box3d', 'shadows3d'];
 const SELECT = ['material', 'layout'];
 /** Settings that only change the cutting files: no new solve. */
 const FAB_ONLY = new Set(['slotClear', 'minSlot', 'combMargin', 'combEnd', 'holeDia', 'bedMm', 'minWeb', 'splitComb', 'combThick', 'standoff']);
 /** Settings that only change how the 3D view looks. */
-const VIEW_ONLY = new Set(['box3d', 'combLook', 'combColor']);
+const VIEW_ONLY = new Set(['box3d', 'combLook', 'combColor', 'shadows3d']);
+/** The default comb colour in the dark-ribbon scheme. */
+const LIGHT_COMB = '#e4e4e4';
 /** The material preset's settings: editing one makes the material "custom". */
 const MATERIAL_KEYS = Object.keys(materialSettings('satin'));
 
@@ -162,6 +164,7 @@ function showFields() {
   $('layout').value = s.layout;
   $('curve').value = s.curve;
   $('combLook').value = s.combLook;
+  $('darkRibbons').checked = !!s.darkRibbons;
   $('combColor').value = s.combColor;
   for (const el of document.querySelectorAll('.u')) el.textContent = unitLabel();
   for (const b of document.querySelectorAll('#unitSeg button')) b.setAttribute('aria-pressed', String(b.dataset.units === s.units));
@@ -217,10 +220,19 @@ function bindFields() {
     '<option value="custom">Custom</option>';
   $('material').addEventListener('change', () => {
     s.material = $('material').value;
-    Object.assign(s, materialSettings(s.material));
+    Object.assign(s, materialSettings(s.material, s.darkRibbons));
     showFields();
     updatePieceNote();
     changed('material');
+  });
+  $('darkRibbons').addEventListener('change', () => {
+    // the scheme swaps the ribbon's and the backdrop's reflectance, and a
+    // default comb colour with them (dark combs vanish in a black box, light ones in a white one)
+    s.darkRibbons = $('darkRibbons').checked;
+    [s.reflectance, s.bgReflectance] = [s.bgReflectance, s.reflectance];
+    if (s.combColor === (s.darkRibbons ? DEFAULTS.combColor : LIGHT_COMB)) s.combColor = s.darkRibbons ? LIGHT_COMB : DEFAULTS.combColor;
+    showFields();
+    changed('darkRibbons');
   });
   $('layout').addEventListener('change', () => { s.layout = $('layout').value; showLayout(); changed('layout'); });
   let curveTimer = null;
@@ -292,9 +304,9 @@ function sizeCanvas(W, H) {
  */
 const greyOf = (Y, exposure) => Math.round(255 * toEncoded(Y / exposure));
 
-/** The brightest face any ribbon can show at any angle (the model's, before shadows; or the slices', with a measured curve). */
+/** The brightest thing in view: the brightest face any ribbon can show (the model's, before shadows; or the slices', with a measured curve), or a white backdrop. */
 function exposureOf(plan, slices) {
-  let ex = 1e-6;
+  let ex = backdropY(plan.s);
   if (plan.curvePts) {
     for (const r of slices) for (const v of r.F) if (v > ex) ex = v;
     return ex;
@@ -314,6 +326,25 @@ function drawRibbons(ctx, plan, slices) {
   const ex = state.exposure;
   ctx.fillStyle = GREYS[greyOf(backdropY(plan.s), ex)];
   ctx.fillRect(0, 0, W, H);
+  const sh = slices.shadow;
+  if (sh) {
+    // the ribbons' shadows on the backdrop, under everything else
+    ctx.save();
+    ctx.beginPath(); ctx.rect(0, 0, W, H); ctx.clip();
+    ctx.fillStyle = GREYS[greyOf(sh.Y, ex)];
+    const Ys = (y) => sh.ye + (y + sh.dy - sh.ye) * sh.k;
+    for (const { sl, sr } of slices) {
+      ctx.beginPath();
+      ctx.moveTo(sl[0], Ys(0));
+      for (let j = 0; j < n; j++) ctx.lineTo(sl[j], Ys((j + 0.5) * dy));
+      ctx.lineTo(sl[n - 1], Ys(H)); ctx.lineTo(sr[n - 1], Ys(H));
+      for (let j = n - 1; j >= 0; j--) ctx.lineTo(sr[j], Ys((j + 0.5) * dy));
+      ctx.lineTo(sr[0], Ys(0));
+      ctx.closePath();
+      ctx.fill();
+    }
+    ctx.restore();
+  }
   for (const i of paintOrder(plan)) {
     const { xl, xr, F } = slices[i];
     const grad = ctx.createLinearGradient(0, 0, 0, H);
@@ -575,6 +606,7 @@ function draw3D() {
     comb: { look: v.combLook, albedo: hexToLinear(v.combColor) },
     rodAlbedo: [0.5, 0.5, 0.52],
     background: [0.114, 0.122, 0.149],
+    shadows: v.shadows3d,
   });
 }
 

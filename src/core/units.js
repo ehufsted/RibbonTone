@@ -51,6 +51,7 @@ export const DEFAULTS = {
   pitch: 30,            // mm, centre to centre
   thickness: 0.25,      // mm
   material: 'satin',
+  darkRibbons: false,   // dark ribbons on a white backdrop: swaps the two reflectances
   reflectance: 0.85,
   sheen: 0.2,
   gloss: 10,
@@ -94,14 +95,18 @@ export const DEFAULTS = {
   box3d: true,          // the black box around the back, sides, top and bottom
   combLook: 'solid',    // 'solid' | 'clear'
   combColor: '#222222', // solid combs and tabs
+  shadows3d: true,      // cast shadows in the 3D view
 };
 
-/** The settings a material preset sets. */
-export const materialSettings = (id) => {
+/** A dyed-black ribbon's reflectance, for the dark scheme. */
+export const DARK_RIBBON = 0.05;
+
+/** The settings a material preset sets (a dyed-black ribbon in the dark scheme). */
+export const materialSettings = (id, dark = false) => {
   const m = MATERIALS[id];
   if (!m) return {};
   const { label, ...rest } = m;
-  return rest;
+  return dark ? { ...rest, reflectance: DARK_RIBBON } : rest;
 };
 
 /** The most ribbons, and samples down a ribbon, a plan may have. */

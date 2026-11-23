@@ -144,7 +144,7 @@
 <body>
 <header>
   <h1>RibbonTone</h1>
-  <span class="sub">image &rarr; a halftone of twisted white ribbons</span>
+  <span class="sub">image &rarr; a halftone of twisted ribbons</span>
   <span class="hspacer"></span>
   <button class="mini" id="resetAll" title="every control back to its default (the image stays)">Reset all</button>
   <button class="mini" id="openProject" title="open a saved project (.rtone.json): the image and every setting">Open project…</button>
@@ -201,8 +201,9 @@
     <details open>
       <summary>Material &amp; tension</summary>
       <div class="body">
+        <label class="check" title="black ribbons on a white backdrop: swaps the ribbon's and the backdrop's reflectance"><input type="checkbox" id="darkRibbons"> Dark ribbons on a white backdrop</label>
         <div class="row"><label for="material">Material</label><select id="material"></select></div>
-        <div class="row" title="how much light the white face returns"><label for="reflectance">Reflectance</label><input type="number" id="reflectance" min="0" max="1" step="0.01"></div>
+        <div class="row" title="how much light the ribbon's face returns"><label for="reflectance">Ribbon reflectance</label><input type="number" id="reflectance" min="0" max="1" step="0.01"></div>
         <div class="row" title="satin highlight strength (0 = matte)"><label for="sheen">Sheen</label><input type="number" id="sheen" min="0" max="2" step="0.01"></div>
         <div class="row" title="the edge stretch the ribbon takes before it overstretches; it sets the fastest twist"><label for="strainPct">Edge strain limit</label><input type="number" id="strainPct" min="0.01" step="0.01"><span class="unit">%</span></div>
         <div class="row" title="the pull of the fixed bottom bar on each ribbon"><label for="tensionN">Tension per ribbon</label><input type="number" id="tensionN" min="0" step="0.1"><span class="unit">N</span></div>
@@ -226,7 +227,7 @@
         <div class="row" title="0 = straight on; + = from the viewer's right"><label for="lightAz">Light from</label><input type="range" id="lightAz" min="-80" max="80" step="1"><span class="val" id="lightAzVal"></span></div>
         <div class="row"><label for="lightEl">Light height</label><input type="range" id="lightEl" min="0" max="85" step="1"><span class="val" id="lightElVal"></span></div>
         <div class="row" title="the share of light from everywhere (walls, ceiling)"><label for="ambient">Ambient</label><input type="range" id="ambient" min="0" max="1" step="0.01"><span class="val" id="ambientVal"></span></div>
-        <div class="row" title="the black backdrop's reflectance"><label for="bgReflectance">Backdrop</label><input type="number" id="bgReflectance" min="0" max="1" step="0.01"></div>
+        <div class="row" title="the backdrop's reflectance (the box's back wall)"><label for="bgReflectance">Backdrop</label><input type="number" id="bgReflectance" min="0" max="1" step="0.01"></div>
         <div class="row"><label for="distM">Viewing distance</label><input type="number" id="distM" min="0.3" step="0.1"><span class="unit">m</span></div>
         <div class="row" title="the viewer's offset from the piece's centre line (+ = right)"><label for="viewXMm">Viewer offset</label><input type="number" id="viewXMm" class="len" step="any"><span class="unit u"></span></div>
         <label class="check" title="replace the model with brightness measured under the real light: photograph the calibration combs from the viewing distance"><input type="checkbox" id="curveOn"> Use a measured brightness curve</label>
@@ -322,7 +323,8 @@
           <option value="top">Top</option>
           <option value="side">Side</option>
         </select>
-        <label class="check" title="the black box around the back, sides, top and bottom"><input type="checkbox" id="box3d"> Box</label>
+        <label class="check" title="the box around the back, sides, top and bottom"><input type="checkbox" id="box3d"> Box</label>
+        <label class="check" title="shadows cast by the ribbons, combs, tabs and box"><input type="checkbox" id="shadows3d"> Shadows</label>
         <select id="combLook" title="how the combs and pin tabs are drawn"><option value="solid">Solid combs</option><option value="clear">Clear combs</option></select>
         <input type="color" id="combColor" title="solid comb colour">
       </span>
