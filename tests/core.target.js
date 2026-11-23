@@ -22,4 +22,9 @@ export function run() {
   check('reach: darkest all reach is the larger minimum, brightest the smaller maximum', r.Ymin === f32(0.1) && r.Ymax === f32(0.5) && r.YmaxAny === f32(0.6));
   check('black maps to Lmin, white to Lmax', Math.abs(toneMap(0, r) - r.Lmin) < 1e-12 && Math.abs(toneMap(1, r) - r.Lmax) < 1e-12);
   check('contrast 2 clips a dark grey to Lmin', Math.abs(toneMap(0.005, r, 2) - r.Lmin) < 1e-12);
+  // a pitch typed as "0" on the way to "0.5" once looped forever
+  const g0 = pieceGeometry(lum, { ...s, pitch: 0 });
+  check('pitch 0 (half typed): no ribbons, no endless loop', g0.count === 0 && g0.xs.length === 0);
+  const gTiny = pieceGeometry(lum, { ...s, pitch: 0.001 });
+  check('a pitch giving 280 001 ribbons: counted, not listed', gTiny.count === 280001 && gTiny.xs.length === 0, `${gTiny.count}`);
 }

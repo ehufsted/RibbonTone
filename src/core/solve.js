@@ -35,6 +35,8 @@ const INV_STEP = 1 / LUT_STEP;
 function lutL(L, th) {
   let u = th * INV_STEP;
   u -= LUT_N * Math.floor(u / LUT_N);
+  // a hair below a multiple of 180° wraps to exactly LUT_N in floating point
+  if (u >= LUT_N) u -= LUT_N;
   const k = u | 0, f = u - k;
   const a = L[k], b = L[k + 1 === LUT_N ? 0 : k + 1];
   return a + (b - a) * f;
@@ -199,7 +201,12 @@ export function placeKnots(cost, grid, maxCount) {
   let sol = run(lo0);
   if (!sol) return null;
   if (sol.count <= maxCount) return { ...sol, forced: false };
-  let hi = 4 * (Q[last] + 1), hiSol = run(hi);
+  // a price that no bracket can repay: a bracket saves at most the cost of the
+  // chain without it, which is at most every finite span cost added up (summed
+  // over all the ribbons, for shared rows)
+  let total = 0;
+  for (const c of cost) if (c !== Infinity) total += c;
+  let hi = 1 + total, hiSol = run(hi);
   if (hiSol.count > maxCount) return { ...hiSol, forced: true };
   let lo = lo0;
   for (let it = 0; it < 40; it++) {

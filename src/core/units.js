@@ -104,17 +104,21 @@ export const MAX_SAMPLES = 700;
 
 /**
  * The piece's size, the image's place on it, and the ribbons' centres.
- * @returns {{W, H, imageRect:{x,y,w,h}, xs:number[]}}
+ * Settings a person is still typing (a pitch of 0 on the way to 0.5) give no
+ * ribbons rather than an endless loop; past MAX_RIBBONS the centres are not
+ * listed at all, only counted.
+ * @returns {{W, H, imageRect:{x,y,w,h}, xs:number[], count:number}}
  */
 export function pieceGeometry(img, s) {
   const W = s.widthMm;
   const H = s.heightMm > 0 ? s.heightMm : (W * img.height) / img.width;
   const scale = Math.max(W / img.width, H / img.height);
   const w = img.width * scale, h = img.height * scale;
-  const n = Math.max(0, Math.floor((W - s.ribbonW) / s.pitch + 1e-9) + 1);
+  const ok = W > 0 && s.pitch > 0 && s.ribbonW > 0 && isFinite(W / s.pitch);
+  const count = ok ? Math.max(0, Math.floor((W - s.ribbonW) / s.pitch + 1e-9) + 1) : 0;
   const xs = [];
-  for (let i = 0; i < n; i++) xs.push(W / 2 + (i - (n - 1) / 2) * s.pitch);
-  return { W, H, imageRect: { x: (W - w) / 2, y: (H - h) / 2, w, h }, xs };
+  if (count <= MAX_RIBBONS) for (let i = 0; i < count; i++) xs.push(W / 2 + (i - (count - 1) / 2) * s.pitch);
+  return { W, H, imageRect: { x: (W - w) / 2, y: (H - h) / 2, w, h }, xs, count };
 }
 
 /**

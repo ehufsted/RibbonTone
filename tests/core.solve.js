@@ -59,6 +59,11 @@ export function run() {
     brute = Math.min(brute, c);
   }
   const dp = placeKnots(c2, g2, 99);
+  // shared rows sum many ribbons' costs: the price that stops brackets must
+  // scale with the costs, not with the grid (it once topped out at 4·n)
+  const big = cost.map((c) => c * 1e5);
+  const pkBig = placeKnots(big, grid, 2);
+  check('costs ×10⁵ (many ribbons summed), at most 2 brackets (600 mm in spans of 200 needs 2): 2, not "forced"', pkBig.count <= 2 && !pkBig.forced, `${pkBig.count}, forced ${pkBig.forced}`);
   check(`DP equals brute force over all ${1 << (P - 2)} subsets`, Math.abs(dp.cost - brute) < 1e-6 * Math.max(1, brute), `${num(dp.cost, 6)} vs ${num(brute, 6)}`);
 
   section('core.solve: angles', 'Viterbi over each bracket\'s angle with the exact span cost. Every span\'s PEAK rate (tension-weighted) ' +
@@ -91,4 +96,7 @@ export function run() {
     best = Math.min(best, e);
   }
   check('equals exhaustive search over 7³ angle choices', Math.abs(small.cost - best) < 1e-4 * Math.max(1e-3, best), `${num(small.cost, 6)} vs ${num(best, 6)}`);
+  // a hair below a multiple of 180° once wrapped one past the table's end (NaN)
+  const edge = pathLightness(L, [-1e-15, 180 - 1e-13, -360 - 1e-14]);
+  check('angles a hair below a multiple of 180° read the table, not NaN', Array.from(edge).every((v) => Math.abs(v - L[0]) < 1e-6), Array.from(edge).map((v) => num(v, 4)).join(' '));
 }

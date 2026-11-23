@@ -43,7 +43,7 @@ const state = {
   imageName: 'ribbons',
   imageSrc: null,       // {kind:'sample', name} | {kind:'file', name, dataURL}
   lum: null,            // toned luminance, for the Target view
-  set: { ...DEFAULTS },
+  set: { ...DEFAULTS },  // ONE object for the page's life: bindFields holds it, so Reset and Open project assign into it
   view: 'preview',
   plan: null,
   slices: null,         // core/render.js, per view
@@ -242,7 +242,7 @@ function updatePieceNote() {
   const s = state.set;
   if (state.rgba) {
     const geo = pieceGeometry(state.rgba, s);
-    const n = geo.xs.length;
+    const n = geo.count;
     $('pieceNote').innerHTML = `<b>${n} ribbons</b> on a piece <b>${L(geo.W)} × ${L(geo.H)} ${unitLabel()}</b>` +
       (s.heightMm > 0 ? ' · image cropped to cover' : '') + ` · ribbon length ${lenTxt(geo.H)} each, ${lenTxt(n * geo.H)} in all`;
   }
@@ -655,7 +655,7 @@ async function openFile(f) {
 function bindProjects() {
   $('resetAll').addEventListener('click', () => {
     if (!window.confirm('Reset every control to its default?\n\nThe image stays.')) return;
-    state.set = { ...DEFAULTS };
+    Object.assign(state.set, DEFAULTS);
     showFields();
     updateLum();
     updatePieceNote();
@@ -675,7 +675,7 @@ function bindProjects() {
     if (!f) return;
     try {
       const { project, problems } = parseProject(await f.text());
-      state.set = { ...project.settings };
+      Object.assign(state.set, project.settings);
       showFields();
       const im = project.image;
       if (im && im.kind === 'sample') await loadSample(im.name);

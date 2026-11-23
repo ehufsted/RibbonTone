@@ -53,4 +53,13 @@ export function run() {
   check('spreading the error to the next ribbon lowers the error as the eye mixes it', withDiff.stats.seen <= noDiff.stats.seen,
     `seen ${num(withDiff.stats.seen, 2)} with, ${num(noDiff.stats.seen, 2)} without`);
   check('no bracket layout beats the ideal path (as seen)', ramp.stats.seenIdeal <= ramp.stats.seen + 1e-9, `${num(ramp.stats.seenIdeal, 2)} vs ${num(ramp.stats.seen, 2)}`);
+
+  section('pipeline: limits and bad input', 'Shared rows sum every ribbon\'s cost, so the price that stops brackets must scale with them: ' +
+    'a wide piece held to one row must get one row. Half-typed settings get a message, not a crash.');
+  const wide = runPipeline(detail, { ...sB, widthMm: 1500, maxRows: 1, maxSpan: 1500 });
+  check(`${wide.ribbons.length} ribbons, at most 1 row: one row, and no note blaming the span`, wide.rows.length - 2 <= 1 && !wide.notes.some((t) => t.includes('longest span')),
+    `${wide.rows.length - 2} rows`);
+  const msg = (over) => { try { runPipeline(detail, { ...plain, ...over }); return ''; } catch (e) { return e.message; } };
+  check('row spacing 0: a message, not "Invalid array length"', /row spacing/.test(msg({ rowSpacing: 0 })), msg({ rowSpacing: 0 }));
+  check('pitch 0: a message', /pitch/.test(msg({ pitch: 0 })), msg({ pitch: 0 }));
 }

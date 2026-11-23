@@ -35,6 +35,8 @@ export function problemWith(s) {
   if (!(s.tensionN > 0)) return 'the bottom bar must pull: tension must be more than 0';
   if (!(s.distM > 0)) return 'the viewing distance must be more than 0';
   if (!(s.minSpacing > 0) || !(s.maxSpan >= s.minSpacing)) return 'brackets: the longest span must be at least the least spacing';
+  if (s.layout === 'even' && !(s.rowSpacing > 0)) return 'the row spacing must be more than 0';
+  if (!(s.maxRows >= 0) || !(s.maxPerRibbon >= 0)) return 'the most rows and most brackets per ribbon cannot be negative';
   return '';
 }
 
@@ -55,7 +57,7 @@ export function runPipeline(rgba, settings, opts = {}) {
   const lum = toneLuminance(rgba, s.gamma, s.brightness);
   const geo = pieceGeometry(lum, s);
   const { W, H, xs } = geo;
-  const N = xs.length;
+  const N = geo.count;
   if (N > MAX_RIBBONS) {
     const err = new Error(`${N} ribbons is more than ${MAX_RIBBONS}: widen the pitch or narrow the piece`);
     err.code = 'TOO_MANY';
