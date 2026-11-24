@@ -25,7 +25,7 @@
 //   depth is the deepest comb's; with pins the back wall sits the stand-off
 //   behind the ribbons' farthest edges instead (fab.pinWallDepth).
 
-import { slotRect, clipShapes, combLayout, combRowsOf, planDepth, combEnds, pinWallDepth, BOX_WALL } from './fab.js';
+import { slotRect, clipShapes, combLayout, combRowsOf, planDepth, combEnds, wallDepth, BOX_WALL } from './fab.js';
 
 export { BOX_WALL };
 
@@ -121,7 +121,8 @@ export function buildScene(plan, s) {
   const D = planDepth(plan, s), t = s.combThick;
   const pins = s.hold === 'pins';
   const zFront = D / 2;
-  const zBack = pins ? -Math.max(pinWallDepth(s), D / 2) : -D / 2;
+  const sw = { ...s, backDepth: D };       // this plan's deepest comb, for the wall
+  const zBack = -wallDepth(sw);
   const [bx0, bx1] = combEnds(xs, s);
 
   // ribbons: a strip per ribbon, two triangles between stations
@@ -176,7 +177,7 @@ export function buildScene(plan, s) {
   if (pins) {
     for (const r of plan.ribbons) {
       for (let b = 1; b + 1 < r.knots.length; b++) {
-        const kn = r.knots[b], yw = Y(kn.y), sh = clipShapes(kn.a, s);
+        const kn = r.knots[b], yw = Y(kn.y), sh = clipShapes(kn.a, sw);
         const at = (P) => P.map(([x, z]) => [r.x + x, z]);
         addPrism(clips, at(sh.bar), yw - t / 2, yw + t / 2);
         addPrism(clips, at(sh.stem), yw - t / 2, yw + t / 2);

@@ -72,6 +72,12 @@ export function run() {
     `stems reach z = ${num(extent(ps.clips.pos, 2)[0], 1)}`);
   check('pins: the back wall is the stand-off behind a ribbon turned end-on (45 + 10 mm)', Math.abs(ps.zBack + 55) < 1e-9 && Math.abs(extent(ps.box.pos, 2)[0] + 55 + BOX_WALL) < 1e-4);
   check('pins: clips wind counter-clockwise too', windingOK(ps.clips));
+  // a stand-off so small the bars (combs) set the wall: the stems must still reach it
+  const tight = runPipeline(detail, { ...s, hold: 'pins', layout: 'perRibbon', maxPerRibbon: 5, minSpacing: 40, maxSpan: 400, standoff: 3 });
+  const ts = buildScene(tight, tight.s);
+  check('pins, 3 mm stand-off: the deepest bar sets the wall, and the stems still run into the back panel',
+    ts.zBack < -(3 + 10) - 1 && Math.abs(extent(ts.clips.pos, 2)[0] - extent(ts.box.pos, 2)[0]) < 1e-4,
+    `wall at ${num(ts.zBack, 1)}, stems to ${num(extent(ts.clips.pos, 2)[0], 1)}, panel back at ${num(extent(ts.box.pos, 2)[0], 1)}`);
 
   section('core.scene: settings and camera', 'The back wall\'s distance feeds the solver (backdrop shadows), so the settings that set it ' +
     '(stand-off, comb margin, slot clearance) must re-solve, not just redraw. The orbit camera\'s frame must stay orthonormal and turn ' +

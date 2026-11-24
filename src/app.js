@@ -36,9 +36,9 @@ const RANGE = { gamma: (v) => v.toFixed(2), brightness: (v) => v.toFixed(2), con
 const CHECK = ['curveOn', 'splitComb', 'box3d', 'shadows3d'];
 const SELECT = ['material', 'layout'];
 /** Settings that only change the cutting files: no new solve. */
-// (not slotClear, combMargin or standoff: they set the comb depth and so how far
-// the back wall is behind the ribbons, which the solver's backdrop shadows use)
-const FAB_ONLY = new Set(['minSlot', 'combEnd', 'bedMm', 'minWeb', 'splitComb', 'combThick', 'clipWall']);
+// (not slotClear, minSlot, combMargin or standoff: they set the comb depths and so
+// how far the back wall is behind the ribbons, which the solver's backdrop shadows use)
+const FAB_ONLY = new Set(['combEnd', 'bedMm', 'minWeb', 'splitComb', 'combThick', 'clipWall']);
 /** Settings that only change how the 3D view looks. */
 const VIEW_ONLY = new Set(['box3d', 'combLook', 'combColor', 'shadows3d']);
 /** The default comb colour in the dark-ribbon scheme. */

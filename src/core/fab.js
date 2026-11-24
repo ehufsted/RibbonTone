@@ -82,10 +82,12 @@ export const rowDepth = (angles, s) => 2 * Math.max(...angles.map((a) => slotRea
  * the middle, or one per half of a split comb.
  */
 export function combTabs(D, s) {
-  const keep = Math.max(2, s.minWeb);
+  // material kept beside each tab: the least web (2 mm at least), shrinking on
+  // a slim comb so a tab always keeps at least half its strip
+  const keep = (strip) => Math.min(Math.max(2, s.minWeb), strip / 4);
   return s.splitComb
-    ? [[D / 4, Math.min(10, D / 2 - 2 * keep)], [(3 * D) / 4, Math.min(10, D / 2 - 2 * keep)]]
-    : [[D / 2, Math.min(12, D - 2 * keep)]];
+    ? [[D / 4, Math.min(10, D / 2 - 2 * keep(D / 2))], [(3 * D) / 4, Math.min(10, D / 2 - 2 * keep(D / 2))]]
+    : [[D / 2, Math.min(12, D - 2 * keep(D))]];
 }
 
 /**
@@ -321,7 +323,7 @@ export function planCombs(plan) {
 export function sidePanelPiece(plan) {
   const s = plan.s, H = plan.piece.H, T = BOX_WALL, t = s.combThick;
   const Dmax = planDepth(plan);
-  const zFront = Dmax / 2, zBack = s.hold === 'pins' ? -Math.max(pinWallDepth(s), Dmax / 2) : -Dmax / 2;
+  const zFront = Dmax / 2, zBack = -wallDepth({ ...s, backDepth: Dmax });
   const yTop = H + t / 2 + T, yBot = -t / 2 - T;
   const w = zFront - zBack, h = yTop - yBot;
   const cuts = [{ kind: 'poly', pts: [[0, 0], [w, 0], [w, h], [0, h]] }], engrave = [];
@@ -359,6 +361,18 @@ export function calibrationCombs(s, step = 15) {
  */
 export const pinWallDepth = (s) => s.standoff + s.ribbonW / 2;
 
+/**
+ * THE back wall: how far behind the ribbons' centre line it is. It backs the
+ * deepest comb (`backDepth`, the plan's, set by the pipeline; the deepest a
+ * comb could be until then) and, with pins, is at least pinWallDepth away.
+ * The solver's backdrop shadows, the 3D box, the side panel and the pin
+ * clips' stems all read it, so they cannot disagree.
+ */
+export function wallDepth(s) {
+  const D = s.backDepth > 0 ? s.backDepth : combDepth(s);
+  return s.hold === 'pins' ? Math.max(pinWallDepth(s), D / 2) : D / 2;
+}
+
 /** The box's panels, mm (also the length of the clip stems' tabs through the back panel). */
 export const BOX_WALL = 6;
 
@@ -367,7 +381,7 @@ export const polyArea = (P) => P.reduce((a, [x, y], i) => { const [u, v] = P[(i 
 
 /**
  * One pin clip's shapes, centred on the ribbon, in (x, z): z toward the viewer
- * (the wall is at z = −pinWallDepth). All counter-clockwise in the drawing's sense.
+ * (the wall is at z = −wallDepth). All counter-clockwise in the drawing's sense.
  * @returns {{bar, slot, stem, outline, reach, stemW, join}}
  *   reach: how far the clip reaches toward the wall along the stem's line;
  *   join: the stem's furthest point toward the viewer (z); outline: bar ∪ stem, the cut path
@@ -382,7 +396,7 @@ export function clipShapes(th, s) {
   const stemW = 1.6 * b;
   // how far the bar reaches toward the wall along the stem's line (−z)
   const reach = Math.min(Math.abs(uz) > 1e-9 ? a / Math.abs(uz) : Infinity, Math.abs(vz) > 1e-9 ? b / Math.abs(vz) : Infinity);
-  const wallZ = -pinWallDepth(s) - BOX_WALL;
+  const wallZ = -wallDepth(s) - BOX_WALL;
   // The stem's end is cut parallel to the face of the clip it meets -- the long
   // side, or the short end when the clip is turned nearly end-on -- half a clip
   // wall short of the slot. That line separates stem and slot, so the gap holds
@@ -462,7 +476,7 @@ export function unionConvex(A, B) {
 
 /** Every pin clip of a plan, one piece each, the wall at the top. */
 export function pinClipPieces(plan) {
-  const s = plan.s, out = [];
+  const s = { ...plan.s, backDepth: planDepth(plan) }, out = [];
   plan.ribbons.forEach((r, i) => {
     for (let b = 1; b + 1 < r.knots.length; b++) {
       const sh = clipShapes(r.knots[b].a, s);
@@ -506,8 +520,16 @@ export function backPanelPiece(plan) {
   return { w, h, cuts, engrave, name: 'BACK PANEL' };
 }
 
-/** Pieces in rows across a sheet `width` wide (tallest first), `gap` apart. */
+/**
+ * Pieces in rows across a sheet `width` wide (tallest first), `gap` apart. A
+ * width of 0 (or blank: a cutter bed with no limit) makes the sheet about
+ * square, never narrower than the widest piece.
+ */
 export function packPieces(pieces, width, gap = 3) {
+  if (!(width > 0)) {
+    const area = pieces.reduce((a, p) => a + (p.w + gap) * (p.h + gap), 0);
+    width = Math.max(Math.sqrt(area) * 1.1, ...pieces.map((p) => p.w), 1);
+  }
   const order = pieces.map((p, i) => i).sort((a, b) => pieces[b].h - pieces[a].h);
   const placed = [];
   let x = 0, y = 0, rowH = 0, W = 0;

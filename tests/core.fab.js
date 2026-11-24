@@ -1,6 +1,6 @@
 import { section, check, num, plain, vRamp, mkRand } from './runner.js';
 import { runPipeline } from '../src/pipeline.js';
-import { splitPoints, rowDepth, combLayout, planDepth, sidePanelPiece, clipShapes, unionConvex, polyArea, pinClipPieces, backPanelPiece, packPieces, BOX_WALL, slotRect, planCombs, combRow, calibrationCombs, stackPieces, piecesSVG, piecesDXF, bracketList, bracketCSV, wallTemplateSVG, polyDistance, combDepth } from '../src/core/fab.js';
+import { combTabs, splitPoints, rowDepth, combLayout, planDepth, sidePanelPiece, clipShapes, unionConvex, polyArea, pinClipPieces, backPanelPiece, packPieces, BOX_WALL, slotRect, planCombs, combRow, calibrationCombs, stackPieces, piecesSVG, piecesDXF, bracketList, bracketCSV, wallTemplateSVG, polyDistance, combDepth } from '../src/core/fab.js';
 
 const edgeAngle = (p, q, yUp) => (Math.atan2(yUp ? q[1] - p[1] : p[1] - q[1], q[0] - p[0]) * 180) / Math.PI;
 
@@ -98,6 +98,15 @@ export function run() {
   const rowsN = plan.rows.length;
   check(`side panel: one slot per comb tab (${rowsN} rows × 1)`, side.cuts.length === rowsN + 1);
   check('side panel: as deep as the deepest comb', Math.abs(side.w - planDepth(plan)) < 1e-9, `${num(side.w, 2)} mm`);
+  for (const split of [false, true]) {
+    const sl = { ...s, combMargin: 3, splitComb: split };
+    const tabs = combTabs(rowDepth([0, 0], sl), sl), D = rowDepth([0, 0], sl);
+    const inHalf = tabs.every(([c, tw]) => tw > 0 && (split ? (c < D / 2 ? c + tw / 2 <= D / 2 && c - tw / 2 >= 0 : c - tw / 2 >= D / 2 && c + tw / 2 <= D) : c - tw / 2 >= 0 && c + tw / 2 <= D));
+    check(`a slim ${split ? 'split ' : ''}comb (3 mm margin, face-on, ${num(D, 1)} mm deep): every tab has width and fits ${split ? 'its half' : 'the comb'}`, inHalf,
+      tabs.map(([c, tw]) => `${num(tw, 2)} mm`).join(', '));
+  }
+  const square = packPieces([{ w: 10, h: 40 }, { w: 10, h: 40 }, { w: 10, h: 40 }, { w: 10, h: 40 }], 0);
+  check('no bed limit: pieces pack onto a roughly square sheet, not one tall column', square.W > 10 && square.H < 4 * 40, `${num(square.W, 0)} × ${num(square.H, 0)} mm`);
   check('split combs: two tab slots per row', sidePanelPiece({ ...plan, s: { ...plan.s, splitComb: true } }).cuts.length === 2 * rowsN + 1);
 
   const cal = calibrationCombs(s, 15);
@@ -117,7 +126,7 @@ export function run() {
   section('core.fab: pin clips', 'A pin clip is a flat T: a slotted crossbar at the ribbon\'s angle and a stem straight back to the wall. ' +
     'At every angle it must be one closed outline (the union of the two), the stem must join the bar yet stay half a clip wall from the slot, ' +
     'and the stem must run on through the back panel.');
-  const ps = { ...s, standoff: 45, clipWall: 1.5, combThick: 3 };
+  const ps = { ...s, hold: 'pins', standoff: 45, clipWall: 1.5, combThick: 3 };
   let worst = Infinity, joined = true, single = true, areaOK = true, toWall = true;
   for (let a = 0; a < 180; a += 1) {
     const c = clipShapes(a, ps);
