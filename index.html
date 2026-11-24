@@ -49,7 +49,7 @@
   details.sub > summary { text-transform: none; letter-spacing: 0; font-size: 12px; padding: 5px 8px; }
 
   .row { display: flex; align-items: center; gap: 8px; margin: 6px 0; }
-  .row label { flex: 0 0 120px; color: var(--dim); }
+  .row label { flex: 0 0 132px; color: var(--dim); }
   .row input[type=range] { flex: 1 1 auto; min-width: 0; }
   .row .val { flex: 0 0 62px; text-align: right; font-variant-numeric: tabular-nums; }
   .row .unit { color: var(--dim); font-size: 12px; }
@@ -121,7 +121,11 @@
   footer b.bad { color: var(--bad); }
   .note { color: var(--dim); font-size: 11px; margin: 6px 0 0; }
   ul.notes { margin: 6px 0 0; padding-left: 16px; color: var(--warn); font-size: 12px; }
-  ul.notes:empty { display: none; }
+  ul.notes:empty, ul.notes[hidden] { display: none; }
+  /* the warnings, always in view under the view bar */
+  ul.notebar { flex: 0 0 auto; margin: 0; padding: 5px 12px 5px 28px; border-bottom: 1px solid var(--line); background: #e3982012; max-height: 7.5em; overflow-y: auto; }
+  h3.subhead { font-size: 11px; font-weight: 600; color: var(--dim); text-transform: uppercase; letter-spacing: .06em; margin: 12px 0 2px; opacity: .8; }
+  h3.subhead:first-child { margin-top: 2px; }
 
   @media (max-width: 760px) {
     html, body { height: auto; }
@@ -192,8 +196,7 @@
           </div>
         </div>
         <div class="row"><label for="widthMm">Width</label><input type="number" id="widthMm" class="len" min="1" step="any"><span class="unit u"></span></div>
-        <div class="row" title="the ribbons' length between the top bar and the fixed bottom bar"><label for="heightMm">Height</label><input type="number" id="heightMm" class="len" min="0" step="any"><span class="unit u"></span></div>
-        <p class="note">Height 0 follows the image. A fixed height crops the image to cover the piece (it is never stretched).</p>
+        <div class="row" title="the ribbons' length between the top bar and the fixed bottom bar; 0 follows the image (a fixed height crops the image to cover the piece, never stretching it)"><label for="heightMm">Height</label><input type="number" id="heightMm" class="len" min="0" step="any"><span class="unit u"></span><span class="unit">0 = from image</span></div>
         <div class="row"><label for="ribbonW">Ribbon width</label><input type="number" id="ribbonW" class="len" min="0" step="any"><span class="unit u"></span></div>
         <div class="row" title="centre to centre"><label for="pitch">Spacing (pitch)</label><input type="number" id="pitch" class="len" min="0" step="any"><span class="unit u"></span></div>
         <div class="row"><label for="thickness">Thickness</label><input type="number" id="thickness" class="len" min="0" step="any"><span class="unit u"></span></div>
@@ -201,12 +204,13 @@
       </div>
     </details>
 
-    <details open>
+    <details>
       <summary>Material &amp; tension</summary>
       <div class="body">
         <label class="check" title="black ribbons on a white backdrop: swaps the ribbon's and the backdrop's reflectance"><input type="checkbox" id="darkRibbons"> Dark ribbons on a white backdrop</label>
         <div class="row"><label for="material">Material</label><select id="material"></select></div>
         <div class="row" title="how much light the ribbon's face returns"><label for="reflectance">Ribbon reflectance</label><input type="number" id="reflectance" min="0" max="1" step="0.01"></div>
+        <div class="row" title="how much light the backdrop (the box's back wall) returns"><label for="bgReflectance">Backdrop reflectance</label><input type="number" id="bgReflectance" min="0" max="1" step="0.01"></div>
         <div class="row" title="satin highlight strength (0 = matte)"><label for="sheen">Sheen</label><input type="number" id="sheen" min="0" max="2" step="0.01"></div>
         <div class="row" title="the edge stretch the ribbon takes before it overstretches; it sets the fastest twist"><label for="strainPct">Edge strain limit</label><input type="number" id="strainPct" min="0.01" step="0.01"><span class="unit">%</span></div>
         <div class="row" title="the pull of the fixed bottom bar on each ribbon"><label for="tensionN">Tension per ribbon</label><input type="number" id="tensionN" min="0" step="0.1"><span class="unit">N</span></div>
@@ -224,28 +228,14 @@
       </div>
     </details>
 
-    <details open>
+    <details>
       <summary>Light &amp; viewer</summary>
       <div class="body">
         <div class="row" title="0 = straight on; + = from the viewer's right"><label for="lightAz">Light from</label><input type="range" id="lightAz" min="-80" max="80" step="1"><span class="val" id="lightAzVal"></span></div>
         <div class="row"><label for="lightEl">Light height</label><input type="range" id="lightEl" min="0" max="85" step="1"><span class="val" id="lightElVal"></span></div>
         <div class="row" title="the share of light from everywhere (walls, ceiling)"><label for="ambient">Ambient</label><input type="range" id="ambient" min="0" max="1" step="0.01"><span class="val" id="ambientVal"></span></div>
-        <div class="row" title="the backdrop's reflectance (the box's back wall)"><label for="bgReflectance">Backdrop</label><input type="number" id="bgReflectance" min="0" max="1" step="0.01"></div>
-        <div class="row"><label for="distM">Viewing distance</label><input type="number" id="distM" min="0.3" step="0.1"><span class="unit">m</span></div>
-        <div class="row" title="the viewer's offset from the piece's centre line (+ = right)"><label for="viewXMm">Viewer offset</label><input type="number" id="viewXMm" class="len" step="any"><span class="unit u"></span></div>
-        <label class="check" title="replace the model with brightness measured under the real light: photograph the calibration combs from the viewing distance"><input type="checkbox" id="curveOn"> Use a measured brightness curve</label>
-        <div class="group" id="curveBody" hidden>
-          <textarea id="curve" spellcheck="false" placeholder="# angle  value (0–255 from a photo, or 0–1 linear)&#10;-90 18&#10;-75 70&#10;...&#10;0 205&#10;...&#10;90 18"></textarea>
-          <p class="note">One line per test angle: the angle and the brightness averaged over one whole pitch (ribbon and gap) at that slot. Values over 1 are read as 0–255 photo readings. Angles given on one side only are mirrored.</p>
-        </div>
-        <details class="sub">
-          <summary>Calibration combs</summary>
-          <div class="body">
-            <div class="row"><label for="calStep">Angle step</label><select id="calStep"><option value="10">10°</option><option value="15" selected>15°</option><option value="30">30°</option></select></div>
-            <div class="buttons"><button id="calSVG">Calibration combs SVG</button><button id="calDXF">DXF</button></div>
-            <p class="note">Two identical combs, one slot per test angle from −90° to +90° at this pitch: hang a ribbon through each slot pair, light it as it will be shown, photograph it straight on from the viewing distance, and read each pitch's brightness.</p>
-          </div>
-        </details>
+        <div class="row" title="the design viewpoint: how far from the ribbons the viewer stands"><label for="distM">Viewing distance</label><input type="number" id="distM" min="0.3" step="0.1"><span class="unit">m</span></div>
+        <div class="row" title="the design viewpoint's offset from the piece's centre line (+ = right)"><label for="viewXMm">Viewer offset</label><input type="number" id="viewXMm" class="len" step="any"><span class="unit u"></span></div>
       </div>
     </details>
 
@@ -272,49 +262,77 @@
         <div class="row" data-for="perRibbon" title="brackets per ribbon between the bars"><label for="maxPerRibbon">Most per ribbon</label><input type="number" id="maxPerRibbon" min="0" step="1"></div>
         <div class="row" data-for="bunched perRibbon"><label for="minSpacing">Least spacing</label><input type="number" id="minSpacing" class="len" min="0" step="any"><span class="unit u"></span></div>
         <div class="row" data-for="bunched perRibbon"><label for="maxSpan">Longest span</label><input type="number" id="maxSpan" class="len" min="0" step="any"><span class="unit u"></span></div>
-        <div class="row" id="standoffRow" title="pins: the least gap between a ribbon's edge and the back wall (when the ribbon is turned end-on); each clip's stem runs back to the wall"><label for="standoff">Pin stand-off</label><input type="number" id="standoff" class="len" min="0" step="any"><span class="unit u"></span></div>
-        <div class="row" title="how much of each ribbon's tone error the next ribbon makes up for (the eye mixes neighbours)"><label for="diffusion">Spread error</label><input type="range" id="diffusion" min="0" max="1" step="0.05"><span class="val" id="diffusionVal"></span></div>
-        <label class="check" id="combShadowsLabel"><input type="checkbox" id="combShadows"> Model comb shadows (solid combs)</label>
         <label class="check" title="on: neighbouring ribbons turn the same way, so a viewer walking past sees few stripes and a steady picture. Off: they turn opposite ways, so the blended tone holds best from afar but stripes show up close as the viewer moves"><input type="checkbox" id="alignTwists"> Align twists (coherent for a passing viewer)</label>
-        <ul class="notes" id="notes"></ul>
+        <details class="sub">
+          <summary>Advanced</summary>
+          <div class="body">
+            <div class="row" title="how much of each ribbon's tone error the next ribbon makes up for (the eye mixes neighbours)"><label for="diffusion">Spread error</label><input type="range" id="diffusion" min="0" max="1" step="0.05"><span class="val" id="diffusionVal"></span></div>
+          </div>
+        </details>
       </div>
     </details>
 
-    <details open>
+    <details>
       <summary>Fabrication &amp; export</summary>
       <div class="body">
-        <div class="group" id="combFab">
-          <div class="row" title="added to the slot's length and width"><label for="slotClear">Slot clearance</label><input type="number" id="slotClear" class="len" min="0" step="any"><span class="unit u"></span></div>
-          <div class="row" title="narrowest slot the cutter should make"><label for="minSlot">Least slot width</label><input type="number" id="minSlot" class="len" min="0" step="any"><span class="unit u"></span></div>
-          <div class="row" title="comb material in front of and behind each row's farthest-reaching slot (each comb is only as deep as its own row needs)"><label for="combMargin">Comb margin</label><input type="number" id="combMargin" class="len" min="0" step="any"><span class="unit u"></span></div>
-          <div class="row" title="comb beyond the farthest the outer ribbons' slots reach (half a slot, face-on); its tabs plug into the box's side panels"><label for="combEnd">Comb ends</label><input type="number" id="combEnd" class="len" min="0" step="any"><span class="unit u"></span></div>
-          <div class="row" title="longest comb piece your cutter takes; longer combs are cut between ribbons (0 = no limit)"><label for="bedMm">Cutter bed</label><input type="number" id="bedMm" class="len" min="0" step="any"><span class="unit u"></span></div>
-          <div class="row"><label for="minWeb">Least web</label><input type="number" id="minWeb" class="len" min="0" step="any"><span class="unit u"></span></div>
-          <div class="row" title="the sheet the combs and pin tabs are cut from"><label for="combThick">Sheet thickness</label><input type="number" id="combThick" class="len" min="0" step="any"><span class="unit u"></span></div>
-          <label class="check" title="cut each comb in two along a zigzag: the back half has a V at every ribbon leading into the half-slot, so ribbons are laid in rather than threaded, then the front half closes over them"><input type="checkbox" id="splitComb"> Split combs for assembly (zigzag)</label>
-          <p class="note" id="combNote"></p>
-        </div>
-        <div class="group" id="clipFab" hidden>
+        <h3 class="subhead">Combs</h3>
+        <div class="row" title="what the combs (and pin clips) are cut from: clear acrylic casts almost no shadow"><label for="combLook">Material</label><select id="combLook"><option value="solid">Solid (opaque)</option><option value="clear">Clear acrylic</option></select><input type="color" id="combColor" title="the solid combs' colour, for the 3D view"></div>
+        <label class="check" id="combShadowsLabel"><input type="checkbox" id="combShadows"> Model comb shadows</label>
+        <div class="row" title="comb material in front of and behind each row's farthest-reaching slot (each comb is only as deep as its own row needs)"><label for="combMargin">Comb margin</label><input type="number" id="combMargin" class="len" min="0" step="any"><span class="unit u"></span></div>
+        <div class="row" title="comb beyond the farthest the outer ribbons' slots reach (half a slot, face-on); its tabs plug into the box's side panels"><label for="combEnd">Comb ends</label><input type="number" id="combEnd" class="len" min="0" step="any"><span class="unit u"></span></div>
+        <div class="row" title="the sheet the combs and pin clips are cut from"><label for="combThick">Sheet thickness</label><input type="number" id="combThick" class="len" min="0" step="any"><span class="unit u"></span></div>
+        <label class="check" title="cut each comb in two along a zigzag: the back half has a V at every ribbon leading into the half-slot, so ribbons are laid in rather than threaded, then the front half closes over them"><input type="checkbox" id="splitComb"> Split combs for assembly (zigzag)</label>
+        <div class="group" id="pinFab" hidden>
+          <h3 class="subhead">Wall pins</h3>
+          <div class="row" title="the least gap between a ribbon's edge and the back wall (when the ribbon is turned end-on); each clip's stem runs back to the wall"><label for="standoff">Stand-off</label><input type="number" id="standoff" class="len" min="0" step="any"><span class="unit u"></span></div>
           <div class="row" title="clip material around the slot, on every side; the stem is a little narrower"><label for="clipWall">Clip wall</label><input type="number" id="clipWall" class="len" min="0" step="any"><span class="unit u"></span></div>
-          <div class="buttons">
-            <button id="exportClipsSVG" title="one flat T per bracket: a slotted clip at the ribbon's angle on a stem to the wall; packed across the cutter bed">Pin clips SVG</button>
-            <button id="exportClipsDXF">Pin clips DXF</button>
-            <button id="exportPanelSVG" title="the box's back panel with a slot for every clip's stem">Back panel SVG</button>
-            <button id="exportPanelDXF">Back panel DXF</button>
+        </div>
+        <h3 class="subhead">Slots</h3>
+        <div class="row" title="added to the slot's length and width"><label for="slotClear">Clearance</label><input type="number" id="slotClear" class="len" min="0" step="any"><span class="unit u"></span></div>
+        <div class="row" title="narrowest slot the cutter should make"><label for="minSlot">Least width</label><input type="number" id="minSlot" class="len" min="0" step="any"><span class="unit u"></span></div>
+        <div class="row" title="the least material left between neighbouring slots (or the split's cut and a slot)"><label for="minWeb">Least web</label><input type="number" id="minWeb" class="len" min="0" step="any"><span class="unit u"></span></div>
+        <h3 class="subhead">Machine</h3>
+        <div class="row" title="longest piece your cutter takes; longer combs are cut between ribbons (0 = no limit)"><label for="bedMm">Cutter bed</label><input type="number" id="bedMm" class="len" min="0" step="any"><span class="unit u"></span><span class="unit">0 = no limit</span></div>
+        <p class="note" id="combNote"></p>
+
+        <h3 class="subhead">Export</h3>
+        <div class="row">
+          <label>Cut files as</label>
+          <div class="seg" id="fmtSeg">
+            <button data-fmt="svg" aria-pressed="true">SVG</button>
+            <button data-fmt="dxf" aria-pressed="false">DXF</button>
           </div>
-          <p class="note">Each clip's stem runs back through the back panel as a tab; the clips are labelled ribbon.bracket on the stem.</p>
         </div>
         <div class="buttons">
-          <button class="primary" id="exportCombsSVG" title="every comb row, stacked on one sheet: cut red, engrave blue">Combs SVG</button>
-          <button id="exportCombsDXF">Combs DXF</button>
-          <button id="exportSideSVG" title="the box's side panel (cut two) with a slot for every comb tab at its row's height">Side panel SVG</button>
-          <button id="exportSideDXF">Side panel DXF</button>
-          <button id="exportCSV" title="every bracket: height, slot angle, and the twist since the one above (size and direction)">Bracket list CSV</button>
-          <button id="exportTemplate" title="1:1 wall template with a dial at every bracket">Wall template SVG</button>
-          <button id="exportJson" title="the whole plan: every ribbon's brackets and angles">Plan JSON</button>
-          <button id="exportPng">Preview PNG</button>
+          <button class="primary" id="exportCombs" title="every comb row, on one sheet: cut red, engrave blue">Combs</button>
+          <button id="exportSide" title="the box's side panel (cut two) with a slot for every comb tab at its row's height">Side panel</button>
+          <button id="exportClips" title="one flat T per bracket: a slotted clip at the ribbon's angle on a stem to the wall, packed across the cutter bed">Pin clips</button>
+          <button id="exportPanel" title="the box's back panel with a slot for every clip's stem">Back panel</button>
+        </div>
+        <div class="buttons">
+          <button id="exportCSV" title="every bracket: height, slot angle, and the twist since the one above (size and direction)">Bracket list (CSV)</button>
+          <button id="exportTemplate" title="1:1 wall template with a dial at every bracket">Wall template (SVG)</button>
+        </div>
+        <div class="buttons">
+          <button id="exportJson" title="the whole plan: every ribbon's brackets and angles">Plan (JSON)</button>
+          <button id="exportPng" title="the current view as a picture">View (PNG)</button>
         </div>
         <p class="note">Angles: 0° faces the viewer; + turns the face to the viewer's right (clockwise seen from above). A slot holds θ and θ + 180° alike, so the bracket list gives each twist's size and direction to install between brackets.</p>
+      </div>
+    </details>
+
+    <details>
+      <summary>Calibration</summary>
+      <div class="body">
+        <p class="note">Measure how bright a ribbon looks at each angle under the real light, to replace the model.</p>
+        <div class="row"><label for="calStep">Angle step</label><select id="calStep"><option value="10">10°</option><option value="15" selected>15°</option><option value="30">30°</option></select></div>
+        <div class="buttons"><button id="calExport" title="two identical combs, one slot per test angle (cut files in the format chosen under Export)">Calibration combs</button></div>
+        <p class="note">Hang a ribbon through each slot pair, light it as it will be shown, photograph it straight on from the viewing distance, and read each pitch's brightness.</p>
+        <label class="check" title="replace the model with the brightness measured under the real light"><input type="checkbox" id="curveOn"> Use a measured brightness curve</label>
+        <div class="group" id="curveBody" hidden>
+          <textarea id="curve" spellcheck="false" placeholder="# angle  value (0–255 from a photo, or 0–1 linear)&#10;-90 18&#10;-75 70&#10;...&#10;0 205&#10;...&#10;90 18"></textarea>
+          <p class="note">One line per test angle: the angle and the brightness averaged over one whole pitch (ribbon and gap) at that slot. Values over 1 are read as 0–255 photo readings. Angles given on one side only are mirrored.</p>
+        </div>
       </div>
     </details>
   </aside>
@@ -323,12 +341,12 @@
     <div class="viewbar">
       <div class="seg" id="viewSeg">
         <button data-view="preview" aria-pressed="true" title="the ribbons from the design viewpoint">Preview</button>
-        <button data-view="ideal" aria-pressed="false" title="the same with a bracket at every point: the best the twist limit allows">Ideal</button>
         <button data-view="target" aria-pressed="false" title="the image fitted into the range the ribbons can reach">Target</button>
-        <button data-view="diff" aria-pressed="false">Difference</button>
-        <button data-view="brackets" aria-pressed="false" title="where every bracket goes and its slot angle">Brackets</button>
         <button data-view="distance" aria-pressed="false" title="the preview as it looks from across the room">Distance</button>
         <button data-view="view3d" aria-pressed="false" title="the whole piece in 3D: ribbons, combs or pins, and the box">3D</button>
+        <button data-view="brackets" aria-pressed="false" title="where every bracket goes and its slot angle">Brackets</button>
+        <button data-view="ideal" aria-pressed="false" title="the same with a bracket at every point: the best the twist limit allows">Ideal</button>
+        <button data-view="diff" aria-pressed="false" title="lightness error, ribbon by ribbon">Difference</button>
       </div>
       <span class="distctl" id="ctl3d" hidden>
         <select id="camPreset" title="camera">
@@ -341,8 +359,6 @@
         </select>
         <label class="check" title="the box around the back, sides, top and bottom"><input type="checkbox" id="box3d"> Box</label>
         <label class="check" title="shadows cast by the ribbons, combs, tabs and box"><input type="checkbox" id="shadows3d"> Shadows</label>
-        <select id="combLook" title="how the combs and pin tabs are drawn"><option value="solid">Solid combs</option><option value="clear">Clear combs</option></select>
-        <input type="color" id="combColor" title="solid comb colour">
       </span>
       <span class="distctl" id="walkCtl" title="see the piece as a viewer this many degrees round from the design viewpoint does, at the same distance from the piece's centre (in the Distance view, the distance chosen there); double-click: back to the design viewpoint">
         <label>Viewer <input type="range" id="walkDeg" min="-75" max="75" step="1" value="0"> <span id="walkVal">design</span></label>
@@ -357,6 +373,7 @@
       <div class="spacer"></div>
       <span id="hint" class="note"></span>
     </div>
+    <ul class="notes notebar" id="notes" hidden></ul>
     <div class="stage" id="stage">
       <div class="canvaswrap" id="wrap"><canvas id="view"></canvas></div>
       <canvas id="view3d" hidden></canvas>
@@ -369,9 +386,9 @@
   <span>piece <b id="statPiece">—</b></span>
   <span title="brackets between the bars (shared rows × ribbons, or per ribbon)">brackets <b id="statBrackets">—</b></span>
   <span title="mean lightness error ×100 against the target, sample by sample">tone error <b id="statTone">—</b></span>
-  <span title="the same after the eye mixes neighbouring ribbons and about a pitch down each; in brackets, what the ideal path (a bracket everywhere) would give">as seen <b id="statSeen">—</b></span>
-  <span title="for a viewer 1 m to either side (lightness × 100): STRIPES, how differently neighbouring ribbons change (seen up close) / TONE, how the blended picture changes, a uniform shift aside (seen from afar). Align twists on gives the fewest stripes; off, the steadiest tone from afar (with strong stripes)">walk-by stripes / tone <b id="statOff">—</b></span>
-  <span title="the fastest span's peak twist rate as a share of the limit">twist <b id="statRate">—</b></span>
+  <span title="the same after the eye mixes neighbouring ribbons and about a pitch down each, as from across the room; in brackets, what a bracket everywhere (the Ideal view) would give">from afar <b id="statSeen">—</b></span>
+  <span title="for a viewer 1 m to either side (lightness × 100): STRIPES, how differently neighbouring ribbons change (seen up close) / TONE, how the blended picture changes, a uniform shift aside (seen from afar). Align twists on gives the fewest stripes; off, the steadiest tone from afar (with strong stripes)">walking past: stripes / tone <b id="statOff">—</b></span>
+  <span title="the fastest span's peak twist rate as a share of the limit">fastest twist <b id="statRate">—</b></span>
   <span id="status">idle</span>
 </footer>
 

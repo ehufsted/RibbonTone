@@ -98,6 +98,7 @@ export const DEFAULTS = {
   combLook: 'solid',    // 'solid' | 'clear'
   combColor: '#222222', // solid combs and tabs
   shadows3d: true,      // cast shadows in the 3D view
+  exportFormat: 'svg',  // cut files as 'svg' or 'dxf'
 };
 
 /** A dyed-black ribbon's reflectance, for the dark scheme. */

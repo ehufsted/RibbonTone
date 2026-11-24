@@ -45,7 +45,8 @@ export function run() {
   const grey = flatRGBA(40, 80, 150);
   const on = runPipeline(grey, { ...base, combShadows: true }), off = runPipeline(grey, { ...base, combShadows: false });
   check('on: the plan carries the shading; off: it does not', !!on.combShade && off.combShade === null);
-  check('off: a note says how much of the height the combs would shade', off.notes.some((t) => /would shade \d+%/.test(t)), off.notes.find((t) => /shade/.test(t)));
+  check('off: the plan\'s information (not its warnings) says how much of the height the combs would shade',
+    off.info.some((t) => /would shade \d+%/.test(t)) && !off.notes.some((t) => /would shade/.test(t)), off.info.find((t) => /shade/.test(t)));
   const cut = on.combShade.zc;
   // judge both plans by the shadowed truth
   const shadedL = (p) => p.ribbons.map((r) => { const model = makeShade(p.s, r.alpha, on.combShade.W); return Float64Array.from(r.th, (t, j) => model.L(t, cut[j])); });

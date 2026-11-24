@@ -250,12 +250,14 @@ function solveOnce(rgba, settings, opts = {}) {
     r.Lideal = pathLightness(Llut[i], r.ideal);
   });
 
+  const info = [];
   if (zcAll && s.hold === 'combs') {
     let n0 = 0;
     for (const v of zcAll) if (v >= 0) n0++;
     const pct = Math.round((100 * n0) / n);
     if (pct > 0) {
-      notes.push(shadeOn
+      // information, not a warning: shown with the comb details, not among the notes
+      info.push(shadeOn
         ? `comb shadows cover ${pct}% of the ribbons' height (face-on): the solver allows for them`
         : s.combLook === 'clear' ? `solid combs would shade ${pct}% of the ribbons' height (face-on); clear ones hardly any`
           : `solid combs would shade ${pct}% of the ribbons' height (face-on) under this light: tick "Model comb shadows", use clear combs, or light from lower down`);
@@ -275,7 +277,7 @@ function solveOnce(rgba, settings, opts = {}) {
     combShade: shadeOn ? { zc, W: backdropDistance(s), reach: s.ribbonW / 2 } : null,
     piece: { W, H }, imageRect: geo.imageRect, n, dy, xv,
     ribbons, rows, layout, hold: s.hold, range, kmaxDeg, quarterTurn: quarterTurnLength(s),
-    curvePts, s, stats, notes,
+    curvePts, s, stats, notes, info,
   };
 }
 

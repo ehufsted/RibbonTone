@@ -40,7 +40,7 @@ const SELECT = ['material', 'layout'];
 // how far the back wall is behind the ribbons, which the solver's backdrop shadows use)
 const FAB_ONLY = new Set(['combEnd', 'bedMm', 'minWeb', 'splitComb', 'combThick', 'clipWall']);
 /** Settings that only change how the 3D view looks. */
-const VIEW_ONLY = new Set(['box3d', 'combLook', 'combColor', 'shadows3d']);
+const VIEW_ONLY = new Set(['box3d', 'combLook', 'combColor', 'shadows3d', 'exportFormat']);
 /** The default comb colour in the dark-ribbon scheme. */
 const LIGHT_COMB = '#e4e4e4';
 /** The material preset's settings: editing one makes the material "custom". */
@@ -174,6 +174,7 @@ function showFields() {
   for (const el of document.querySelectorAll('.u')) el.textContent = unitLabel();
   for (const b of document.querySelectorAll('#unitSeg button')) b.setAttribute('aria-pressed', String(b.dataset.units === s.units));
   for (const b of document.querySelectorAll('#holdSeg button')) b.setAttribute('aria-pressed', String(b.dataset.hold === s.hold));
+  for (const b of document.querySelectorAll('#fmtSeg button')) b.setAttribute('aria-pressed', String(b.dataset.fmt === s.exportFormat));
   showLayout();
 }
 
@@ -269,15 +270,17 @@ function showLayout() {
   for (const el of document.querySelectorAll('[data-for]')) el.hidden = !el.dataset.for.split(' ').includes(layout);
   $('layoutBlurb').textContent = BLURBS[layout] + (s.hold === 'combs' ? ' Combs hold whole rows, so each ribbon\'s own heights need wall pins.' : '');
   $('curveBody').hidden = !s.curveOn;
-  $('standoffRow').hidden = s.hold !== 'pins';
+  // wall pins: their settings, and their cut files
+  const pins = s.hold === 'pins';
+  $('pinFab').hidden = !pins;
+  $('exportClips').hidden = $('exportPanel').hidden = !pins;
   // clear combs cast almost no shadow: nothing to model
   const clear = s.combLook === 'clear';
   $('combShadows').disabled = clear;
   $('combShadowsLabel').style.opacity = clear ? 0.5 : '';
   $('combShadowsLabel').title = clear ? 'clear combs (the 3D view\'s comb look) cast almost no shadow, so there is nothing to model'
     : 'solid combs shade a band of ribbon and backdrop below them when lit from above: model it, so the solver turns ribbons to make up for it (and bunched rows avoid where it costs most)';
-  $('clipFab').hidden = s.hold !== 'pins';
-  $('combFab').hidden = false;
+
 }
 
 function updatePieceNote() {
@@ -695,7 +698,7 @@ function updateNotes() {
     setStatus(bad, 'bad');
     state.badShown = true;
     $('combNote').textContent = '';
-    $('notes').innerHTML = items.map((t) => `<li>${escapeHtml(t)}</li>`).join('');
+    showNotes(items);
     return;
   }
   if (state.badShown) {
@@ -708,14 +711,10 @@ function updateNotes() {
     const c = planCombs(fp);
     combMsg = `${c.pieces.length} comb pieces${plan.rows && plan.hold !== 'pins' ? '' : ' (the top and bottom bars)'} · ` +
       `deepest ${lenTxt(planDepth(fp))} · least web ${lenTxt(c.web)}`;
-    const bed = state.set.bedMm;
-    if (bed > 0) {
-      const side = sidePanelPiece(fp), panels = [['side panel', side]];
-      if (plan.hold === 'pins') panels.push(['back panel', backPanelPiece(fp)]);
-      for (const [name, pc] of panels) {
-        if (Math.max(pc.w, pc.h) > bed) items.push(`the ${name} (${lenTxt(pc.w)} × ${lenTxt(pc.h)}) is longer than the cutter bed: cut it on a larger machine, or from board by hand`);
-      }
-    }
+    // the panels' sizes, as information: they are usually cut from board or on a bigger machine
+    const bed = state.set.bedMm, side = sidePanelPiece(fp);
+    const panels = [['side panels (2)', side], ...(plan.hold === 'pins' ? [['back panel', backPanelPiece(fp)]] : [])];
+    combMsg += ' · ' + panels.map(([name, pc]) => `${name} ${lenTxt(pc.w)} × ${lenTxt(pc.h)}${bed > 0 && Math.max(pc.w, pc.h) > bed ? ' (longer than the bed)' : ''}`).join(' · ');
     if (c.web < state.set.minWeb) {
       items.push(`comb material comes down to ${lenTxt(c.web)} (between slots${state.set.splitComb ? ', or the split\'s cut and a slot' : ''}), under the least web (${lenTxt(state.set.minWeb)}): widen the pitch`);
     }
@@ -727,14 +726,27 @@ function updateNotes() {
     const past = Math.hypot((st.ribbonW + st.slotClear) / 2 + st.clipWall, slotW / 2 + st.clipWall) - st.ribbonW / 2;
     if (st.standoff < past + 2) items.push(`the pin stand-off (${lenTxt(st.standoff)}) leaves a clip turned end-on (it reaches ${lenTxt(past)} past the ribbon's edge) almost no stem: make it ${lenTxt(past + 10)} or more`);
   }
-  $('combNote').textContent = combMsg;
+  $('combNote').textContent = [combMsg, ...(plan && plan.info ? plan.info : [])].filter(Boolean).join(' · ');
+  showNotes(items);
+  for (const id of EXPORT_IDS) $(id).disabled = !plan && id !== 'calExport';
+  const clips = plan && plan.hold === 'pins' && plan.ribbons.some((r) => r.knots.length > 2);
+  $('exportClips').disabled = $('exportPanel').disabled = !clips;
+}
+
+/** The warnings, in the strip under the view bar (hidden when there are none). */
+function showNotes(items) {
   $('notes').innerHTML = items.map((t) => `<li>${escapeHtml(t)}</li>`).join('');
-  $('exportCombsSVG').disabled = $('exportCombsDXF').disabled = !plan;
+  $('notes').hidden = !items.length;
 }
 
 /** Every button that writes a file. */
-const EXPORT_IDS = ['exportCombsSVG', 'exportCombsDXF', 'exportSideSVG', 'exportSideDXF', 'exportClipsSVG', 'exportClipsDXF',
-  'exportPanelSVG', 'exportPanelDXF', 'exportCSV', 'exportTemplate', 'exportJson', 'exportPng', 'calSVG', 'calDXF'];
+const EXPORT_IDS = ['exportCombs', 'exportSide', 'exportClips', 'exportPanel', 'exportCSV', 'exportTemplate', 'exportJson', 'exportPng', 'calExport'];
+
+/** A cut file in the chosen format (Export: SVG or DXF). */
+function downloadCut(sheet, name, title) {
+  if (state.set.exportFormat === 'dxf') downloadFile(piecesDXF(sheet), `${name}.dxf`, 'application/dxf');
+  else downloadFile(piecesSVG(sheet, title), `${name}.svg`, 'image/svg+xml');
+}
 
 const fabSettings = () => Object.fromEntries([...FAB_ONLY].map((k) => [k, state.set[k]]));
 
@@ -755,11 +767,9 @@ function bindExports() {
     const plan = state.plan;
     return stackPieces(planCombs({ ...plan, s: { ...plan.s, ...fabSettings() } }).pieces);
   };
-  $('exportCombsSVG').addEventListener('click', () => { if (state.plan) downloadFile(piecesSVG(combSheet(), `${base()} combs`), `${base()}-combs.svg`, 'image/svg+xml'); });
-  $('exportCombsDXF').addEventListener('click', () => { if (state.plan) downloadFile(piecesDXF(combSheet()), `${base()}-combs.dxf`, 'application/dxf'); });
+  $('exportCombs').addEventListener('click', () => { if (state.plan) downloadCut(combSheet(), `${base()}-combs`, `${base()} combs`); });
   const sideSheet = () => stackPieces([sidePanelPiece({ ...state.plan, s: { ...state.plan.s, ...fabSettings() } })]);
-  $('exportSideSVG').addEventListener('click', () => { if (state.plan) downloadFile(piecesSVG(sideSheet(), `${base()} side panel`), `${base()}-side-panel.svg`, 'image/svg+xml'); });
-  $('exportSideDXF').addEventListener('click', () => { if (state.plan) downloadFile(piecesDXF(sideSheet()), `${base()}-side-panel.dxf`, 'application/dxf'); });
+  $('exportSide').addEventListener('click', () => { if (state.plan) downloadCut(sideSheet(), `${base()}-side-panel`, `${base()} side panel`); });
   $('exportCSV').addEventListener('click', () => { if (state.plan) downloadFile(bracketCSV(state.plan, state.set.units), `${base()}-brackets.csv`, 'text/csv'); });
   $('exportTemplate').addEventListener('click', () => { if (state.plan) downloadFile(wallTemplateSVG(state.plan), `${base()}-wall-template.svg`, 'image/svg+xml'); });
   $('exportJson').addEventListener('click', () => {
@@ -790,13 +800,13 @@ function bindExports() {
   const clipSheet = () => packPieces(pinClipPieces(pinPlan()), state.set.bedMm);
   const panelSheet = () => stackPieces([backPanelPiece(pinPlan())]);
   const hasClips = () => state.plan && state.plan.hold === 'pins' && state.plan.ribbons.some((r) => r.knots.length > 2);
-  $('exportClipsSVG').addEventListener('click', () => { if (hasClips()) downloadFile(piecesSVG(clipSheet(), `${base()} pin clips`), `${base()}-pin-clips.svg`, 'image/svg+xml'); });
-  $('exportClipsDXF').addEventListener('click', () => { if (hasClips()) downloadFile(piecesDXF(clipSheet()), `${base()}-pin-clips.dxf`, 'application/dxf'); });
-  $('exportPanelSVG').addEventListener('click', () => { if (hasClips()) downloadFile(piecesSVG(panelSheet(), `${base()} back panel`), `${base()}-back-panel.svg`, 'image/svg+xml'); });
-  $('exportPanelDXF').addEventListener('click', () => { if (hasClips()) downloadFile(piecesDXF(panelSheet()), `${base()}-back-panel.dxf`, 'application/dxf'); });
+  $('exportClips').addEventListener('click', () => { if (hasClips()) downloadCut(clipSheet(), `${base()}-pin-clips`, `${base()} pin clips`); });
+  $('exportPanel').addEventListener('click', () => { if (hasClips()) downloadCut(panelSheet(), `${base()}-back-panel`, `${base()} back panel`); });
   const cal = () => stackPieces(calibrationCombs({ ...state.set }, parseFloat($('calStep').value)).pieces);
-  $('calSVG').addEventListener('click', () => downloadFile(piecesSVG(cal(), 'RibbonTone calibration combs'), 'ribbontone-calibration-combs.svg', 'image/svg+xml'));
-  $('calDXF').addEventListener('click', () => downloadFile(piecesDXF(cal()), 'ribbontone-calibration-combs.dxf', 'application/dxf'));
+  $('calExport').addEventListener('click', () => downloadCut(cal(), 'ribbontone-calibration-combs', 'RibbonTone calibration combs'));
+  for (const b of document.querySelectorAll('#fmtSeg button')) {
+    b.addEventListener('click', () => { state.set.exportFormat = b.dataset.fmt; showFields(); changed('exportFormat'); });
+  }
 }
 
 // ------------------------------------------------------------------- image

@@ -38,8 +38,9 @@ Solid combs lit from above shade a band of ribbon and backdrop below each row
 (with the defaults, about 16% of the height). **Model comb shadows** lets the
 solver allow for it: ribbons turn more face-on in the bands, spreading what the
 twist limit will not let them recover over the span, and bunched rows weigh
-each comb's shadow. Off, a note says how much the combs would shade. Clear
-combs, or a lower light, largely avoid the problem.
+each comb's shadow. Off, the comb details say how much the combs would shade.
+Clear combs (Fabrication & export, Combs: Material), or a lower light, largely
+avoid the problem.
 
 ## Twist directions
 
@@ -69,8 +70,12 @@ or pinch to zoom. Presets include the design viewpoint, which matches the Previe
 - A 1:1 wall template.
 - With wall pins: the pin clips (SVG/DXF, packed for the cutter) and the back panel with a slot per clip.
 - Plan JSON and a preview PNG.
-- Calibration combs: photograph them under the real light and type the readings
-  in as a measured brightness curve.
+- Calibration combs (the Calibration section): photograph them under the real
+  light and type the readings in as a measured brightness curve.
+
+Cut files come as SVG or DXF, chosen once under Export. Warnings appear in a
+strip under the view tabs; plain information (comb pieces, panel sizes) sits
+with the comb settings.
 
 See [docs/architecture.md](docs/architecture.md) for the model and the solver.
 
