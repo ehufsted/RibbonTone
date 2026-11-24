@@ -243,12 +243,15 @@ function clipRuns(segs, a, b) {
  * Where to cut a comb `total` long into pieces no longer than `bed`, at the
  * given candidate points (midpoints between ribbons): as few pieces as the bed
  * allows, each cut at the candidate nearest an equal share, falling back to
- * cutting as late as possible when equal shares do not fit.
+ * cutting as late as possible when equal shares do not fit. A bed of 0 (or
+ * blank) means no limit; a bed shorter than a pitch cuts at every midpoint
+ * (no more pieces exist), and the pieces are then longer than the bed.
  * @returns {number[]}  0, the cuts, total
  */
 export function splitPoints(mids, total, bed) {
-  if (total <= bed) return [0, total];
-  const k = Math.ceil(total / bed);
+  if (!(bed > 0) || total <= bed) return [0, total];
+  // a piece per gap between ribbons at most: ceil(total / bed) alone runs away as the bed shrinks
+  const k = Math.min(Math.ceil(total / bed), mids.length + 1);
   const even = [0];
   for (let m = 1; m < k; m++) {
     const want = (m * total) / k;

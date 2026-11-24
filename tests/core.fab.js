@@ -1,6 +1,6 @@
 import { section, check, num, plain, vRamp, mkRand } from './runner.js';
 import { runPipeline } from '../src/pipeline.js';
-import { rowDepth, combLayout, planDepth, sidePanelPiece, clipShapes, unionConvex, polyArea, pinClipPieces, backPanelPiece, packPieces, BOX_WALL, slotRect, planCombs, combRow, calibrationCombs, stackPieces, piecesSVG, piecesDXF, bracketList, bracketCSV, wallTemplateSVG, polyDistance, combDepth } from '../src/core/fab.js';
+import { splitPoints, rowDepth, combLayout, planDepth, sidePanelPiece, clipShapes, unionConvex, polyArea, pinClipPieces, backPanelPiece, packPieces, BOX_WALL, slotRect, planCombs, combRow, calibrationCombs, stackPieces, piecesSVG, piecesDXF, bracketList, bracketCSV, wallTemplateSVG, polyDistance, combDepth } from '../src/core/fab.js';
 
 const edgeAngle = (p, q, yUp) => (Math.atan2(yUp ? q[1] - p[1] : p[1] - q[1], q[0] - p[0]) * 180) / Math.PI;
 
@@ -24,6 +24,11 @@ export function run() {
   const pieceSlots = long.pieces.reduce((a, p) => a + p.cuts.filter((c) => c.kind === 'poly').length - 1, 0);
   check('a 1230 mm comb on a 600 mm bed: three pieces of about equal length, every one fits, no slot lost', long.pieces.length === 3 && Math.min(...long.pieces.map((p) => p.w)) > 350 && long.pieces.every((p) => p.w <= 600 + 1e-9) && pieceSlots === 40,
     `${long.pieces.length} pieces of ${long.pieces.map((p) => num(p.w, 0)).join(', ')} mm`);
+  // a bed of 0 once ran ceil(total / 0) = Infinity rounds and froze the page at start-up
+  const mids = Array.from({ length: 39 }, (_, i) => 15 + 30 * i);
+  check('cutter bed 0, negative or blank: no limit, one piece', [0, -5, NaN, undefined].every((b) => JSON.stringify(splitPoints(mids, 1230, b)) === '[0,1230]'));
+  const tiny = splitPoints(mids, 1230, 1);
+  check('a 1 mm bed: a cut at every midpoint (40 pieces), not 1230 rounds', tiny.length === 41, `${tiny.length - 1} pieces`);
   const tight = { ...s, pitch: 21 };
   const crowd = combRow([0, 21], [0, 0], ['1', '2'], 'R', tight);
   check('pitch 21 mm, both face-on: slots 0.4 mm apart are flagged by the web', crowd.web < 2, `${num(crowd.web, 2)} mm`);
