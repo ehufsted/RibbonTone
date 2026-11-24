@@ -32,6 +32,15 @@ or Edge), or open http://localhost:8080/verify.html.
   cut from sheet: a slotted clip at the ribbon's angle on a stem that plugs
   into the box's back panel.
 
+## Comb shadows
+
+Solid combs lit from above shade a band of ribbon and backdrop below each row
+(with the defaults, about 16% of the height). **Model comb shadows** lets the
+solver allow for it: ribbons turn more face-on in the bands, spreading what the
+twist limit will not let them recover over the span, and bunched rows weigh
+each comb's shadow. Off, a note says how much the combs would shade. Clear
+combs, or a lower light, largely avoid the problem.
+
 ## Twist directions
 
 A ribbon can turn either way and look nearly the same from the design

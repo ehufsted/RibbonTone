@@ -27,6 +27,11 @@
 // The tone error everywhere is the squared difference in lightness (OKLab L,
 // core/optics.js) between what the ribbon shows and what it should.
 //
+// COMB SHADOWS (opts.shade, opts.zc; core/combshade.js). Where a comb's
+// shadow reaches a sample, its lightness comes from the shaded model instead
+// of the LUT; everywhere else the LUT, unchanged. Bracket placement (2) works
+// out each candidate span's own shadow from its top bracket (opts.zf, k, t).
+//
 // ALIGNMENT (opts.prev, opts.alignK). Ribbons are solved left to right; 1 and
 // 3 may add, at every sample, a small cost for turning differently from the
 // ribbon on the left (alignK > 0: k·gap², gap = the angle between them modulo
@@ -35,6 +40,7 @@
 // same -- above all a ribbon's choice of turning one way or the other.
 
 import { LUT_N, LUT_STEP } from './optics.js';
+import { shades } from './combshade.js';
 
 const INV_STEP = 1 / LUT_STEP;
 
@@ -67,6 +73,7 @@ function lutL(L, th) {
  */
 export function idealPath(Llut, Lt, dy, kmaxDeg, opts = {}) {
   const prev = opts.prev, alignK = opts.alignK || 0, aligned = !!(prev && alignK);
+  const shade = opts.shade, zcs = shade && opts.zc;
   const n = Lt.length;
   const stepMax = kmaxDeg * dy;                      // degrees one sample may turn
   const M = Math.ceil(180 / Math.min(1, stepMax));
@@ -80,9 +87,10 @@ export function idealPath(Llut, Lt, dy, kmaxDeg, opts = {}) {
   const turn = 1e-7;
   let D = new Float64Array(M), D2 = new Float64Array(M);
   const back = new Int8Array(n * M);
-  for (let a = 0; a < M; a++) { const e = Ls[a] - Lt[0]; D[a] = e * e + (aligned ? alignCost(a * r, prev[0], alignK) : 0); }
+  const sh0 = zcs && shades(zcs[0], shade);
+  for (let a = 0; a < M; a++) { const e = (sh0 ? shade.L(a * r, zcs[0]) : Ls[a]) - Lt[0]; D[a] = e * e + (aligned ? alignCost(a * r, prev[0], alignK) : 0); }
   for (let j = 1; j < n; j++) {
-    const t = Lt[j], row = j * M;
+    const t = Lt[j], row = j * M, shj = zcs && shades(zcs[j], shade);
     for (let a = 0; a < M; a++) {
       let best = Infinity, bm = 0;
       for (let m = -mMax; m <= mMax; m++) {
@@ -91,7 +99,7 @@ export function idealPath(Llut, Lt, dy, kmaxDeg, opts = {}) {
         const c = D[p] + turn * (m < 0 ? -m : m);
         if (c < best) { best = c; bm = m; }
       }
-      const e = Ls[a] - t;
+      const e = (shj ? shade.L(a * r, zcs[j]) : Ls[a]) - t;
       D2[a] = best + e * e + (aligned ? alignCost(a * r, prev[j], alignK) : 0);
       back[row + a] = bm;
     }
@@ -141,8 +149,10 @@ export function sampleFrame(n, H, model) {
  * peak rate would break the limit, the twist is clamped to it (the angle DP
  * later fixes the ends for real).
  */
-export function spanCosts(frame, Llut, Lt, th, kmaxDeg, grid) {
+export function spanCosts(frame, Llut, Lt, th, kmaxDeg, grid, opts = {}) {
   const { yc, Fc, Fb, model } = frame;
+  // a candidate span's comb shadow: from the comb at its top bracket
+  const shade = opts.shade, sk = opts.k, half = (opts.t || 0) / 2;
   const { Q, dmin, dmax } = grid;
   const P = Q.length, D = dmax + 1;
   const cost = new Float64Array(P * D).fill(Infinity);
@@ -157,8 +167,16 @@ export function spanCosts(frame, Llut, Lt, th, kmaxDeg, grid) {
       const peak = Math.abs(delta) / (model.k(yb) * den);
       if (peak > kmaxDeg) delta *= kmaxDeg / peak;
       let c = 0;
+      const ya = qa * frame.dy;
       for (let j = qa; j < qb; j++) {
-        const e = lutL(Llut, thb[ia] + (delta * (Fc[j] - Fb[qa])) / den) - Lt[j];
+        const th = thb[ia] + (delta * (Fc[j] - Fb[qa])) / den;
+        let L;
+        if (shade) {
+          const below = yc[j] - ya - half;
+          const zc = below >= 0 ? opts.zf - below * sk : -Infinity;
+          L = shades(zc, shade) ? shade.L(th, zc) : lutL(Llut, th);
+        } else L = lutL(Llut, th);
+        const e = L - Lt[j];
         c += e * e;
       }
       cost[ia * D + d] = c;
@@ -244,6 +262,7 @@ export function placeKnots(cost, grid, maxCount) {
  * @returns {{angles: number[], cost: number}}  unwrapped degrees per bracket
  */
 export function solveAngles(frame, Llut, Lt, ys, centers, kmaxDeg, opts = {}) {
+  const shade = opts.shade, zcs = shade && opts.zc;
   const prev = opts.prev, alignK = opts.alignK || 0, aligned = !!(prev && alignK);
   const { yc, Fc, model, dy } = frame;
   const half = opts.window ?? 30, res = opts.res ?? 1;
@@ -276,7 +295,7 @@ export function solveAngles(frame, Llut, Lt, ys, centers, kmaxDeg, opts = {}) {
           let c = D[a];
           for (let j = sp.j0; j < sp.j1 && c < next[b]; j++) {
             const th = ta + delta * sp.f[j - sp.j0];
-            const e = lutL(Llut, th) - Lt[j];
+            const e = (zcs && shades(zcs[j], shade) ? shade.L(th, zcs[j]) : lutL(Llut, th)) - Lt[j];
             c += e * e + (aligned ? alignCost(th, prev[j], alignK) : 0);
           }
           if (c < next[b]) { next[b] = c; bk[b] = a; }
@@ -322,9 +341,9 @@ export function pathFromKnots(frame, knots) {
 }
 
 /** Lightness along a path. */
-export function pathLightness(Llut, th) {
+export function pathLightness(Llut, th, shade = null, zc = null) {
   const out = new Float32Array(th.length);
-  for (let j = 0; j < th.length; j++) out[j] = lutL(Llut, th[j]);
+  for (let j = 0; j < th.length; j++) out[j] = shade && zc && shades(zc[j], shade) ? shade.L(th[j], zc[j]) : lutL(Llut, th[j]);
   return out;
 }
 

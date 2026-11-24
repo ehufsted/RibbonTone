@@ -33,7 +33,7 @@ const LEN = ['clipWall', 'widthMm', 'heightMm', 'ribbonW', 'pitch', 'thickness',
 const NUM = ['reflectance', 'sheen', 'gloss', 'strainPct', 'tensionN', 'density', 'G', 'E', 'bgReflectance', 'distM', 'maxRows', 'maxPerRibbon'];
 const RANGE = { gamma: (v) => v.toFixed(2), brightness: (v) => v.toFixed(2), contrast: (v) => v.toFixed(2),
   lightAz: (v) => `${v}°`, lightEl: (v) => `${v}°`, ambient: (v) => v.toFixed(2), diffusion: (v) => v.toFixed(2) };
-const CHECK = ['curveOn', 'splitComb', 'box3d', 'shadows3d', 'alignTwists'];
+const CHECK = ['curveOn', 'splitComb', 'box3d', 'shadows3d', 'alignTwists', 'combShadows'];
 const SELECT = ['material', 'layout'];
 /** Settings that only change the cutting files: no new solve. */
 // (not slotClear, minSlot, combMargin or standoff: they set the comb depths and so
@@ -332,6 +332,13 @@ function drawRibbons(ctx, plan, slices) {
   const ex = state.exposure;
   ctx.fillStyle = GREYS[greyOf(backdropY(plan.s), ex)];
   ctx.fillRect(0, 0, W, H);
+  const cb = slices.combBands;
+  if (cb && cb.length) {
+    // the combs' shadows on the backdrop, seen from the eye
+    const look = slices.combBandLook, Yb = (y) => look.ye + (y - look.ye) * look.k;
+    ctx.fillStyle = GREYS[greyOf(look.Y, ex)];
+    for (const [y0, y1] of cb) ctx.fillRect(0, Yb(y0), W, Yb(y1) - Yb(y0));
+  }
   const sh = slices.shadow;
   if (sh) {
     // the ribbons' shadows on the backdrop, under everything else

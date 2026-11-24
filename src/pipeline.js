@@ -20,7 +20,8 @@
 
 import { DEFAULTS, pieceGeometry, toneLuminance, MAX_RIBBONS, MAX_SAMPLES, lenText } from './core/units.js';
 import { viewAngle, ribbonLUT, lightnessLUT, parseCurve, backdropDistance } from './core/optics.js';
-import { planDepth } from './core/fab.js';
+import { planDepth, combDepth, combRowsOf, rowDepth } from './core/fab.js';
+import { shadeSlope, makeShade, shadeCutoffs } from './core/combshade.js';
 import { chooseMirrors } from './core/align.js';
 import { sampleColumns, reachRange, toneMap } from './core/target.js';
 import { twistModel, maxTwistDeg, quarterTurnLength } from './core/twist.js';
@@ -74,14 +75,18 @@ export function runPipeline(rgba, settings, opts = {}) {
   // The box's back wall sits against the deepest comb, and comb depths follow
   // the angles (core/fab.js rowDepth): solve with the deepest a comb can be,
   // then once more with the depth that came out, if it moved the wall.
+  // With comb shadows, each comb's own depth sets its shadow, so the second
+  // solve always runs, with every row's depth from the first.
   const first = solveOnce(rgba, settings, opts);
   const deepest = planDepth(first);
-  if (Math.abs(backdropDistance({ ...first.s, backDepth: deepest }) - backdropDistance(first.s)) < 0.25) {
+  const wallMoved = Math.abs(backdropDistance({ ...first.s, backDepth: deepest }) - backdropDistance(first.s)) >= 0.25;
+  if (!wallMoved && !first.combShade) {
     first.s.backDepth = deepest;
     return first;
   }
-  if (opts.onProgress) opts.onProgress('again, for the box\'s depth');
-  const second = solveOnce(rgba, { ...settings, backDepth: deepest }, opts);
+  if (opts.onProgress) opts.onProgress(first.combShade ? 'again, with each comb\'s depth' : 'again, for the box\'s depth');
+  const rowDepths = combRowsOf(first).map((r) => ({ y: r.y, D: rowDepth(r.angles, first.s) }));
+  const second = solveOnce(rgba, { ...settings, backDepth: deepest, rowDepths }, opts);
   second.s.backDepth = planDepth(second);
   return second;
 }
@@ -122,9 +127,19 @@ function solveOnce(rgba, settings, opts = {}) {
     if (c.pts && c.problems.length) notes.push(`measured curve: ${c.problems.join('; ')}`);
   }
   const xv = W / 2 + s.viewXMm;
+  // comb shadows (core/combshade.js): a light from above and in front, and the model, not a measured curve
+  const slope = shadeSlope(s);
+  if (s.combShadows && curvePts) notes.push('comb shadows are not modelled with a measured curve: it cannot be split into direct and ambient light');
+  const shadeOn = !!(s.combShadows && slope && !curvePts);
+  // a comb's front edge: its own depth from the first solve, else the deepest a comb can be
+  const zfAt = (y) => {
+    const hit = (s.rowDepths || []).find((e) => Math.abs(e.y - y) < 1);
+    return (hit ? hit.D : s.backDepth > 0 ? s.backDepth : combDepth(s)) / 2;
+  };
   const alphas = xs.map((x) => viewAngle(x, xv, s.distM));
   const Ylut = alphas.map((al) => ribbonLUT(s, al, curvePts));
   const Llut = Ylut.map(lightnessLUT);
+  const shadeModels = shadeOn ? alphas.map((al) => makeShade(s, al, backdropDistance(s))) : null;
   const range = reachRange(Ylut);
   if (range.Lmax - range.Lmin < 0.02) throw new Error('the ribbons cannot look different from one another at any angle: check the light and the measured curve');
   const Lt = cols.map((col) => Float32Array.from(col, (v) => toneMap(v, range, s.contrast)));
@@ -152,7 +167,10 @@ function solveOnce(rgba, settings, opts = {}) {
   } else if (layout === 'bunched') {
     const sum = new Float64Array(grid.Q.length * (grid.dmax + 1));
     for (let i = 0; i < N; i++) {
-      const c = spanCosts(frame, Llut[i], Lt[i], ideal[i], kmaxDeg, grid);
+      // with comb shadows, a candidate row's cost includes the shadow its comb casts
+      // (no row's own depth yet, so the deepest: zfAt finds no row at y = −1)
+      const so = shadeOn && s.hold === 'combs' ? { shade: shadeModels[i], zf: zfAt(-1), k: slope, t: s.combThick } : {};
+      const c = spanCosts(frame, Llut[i], Lt[i], ideal[i], kmaxDeg, grid, so);
       for (let k = 0; k < sum.length; k++) sum[k] += c[k];
     }
     const pk = placeKnots(sum, grid, Math.max(0, Math.round(s.maxRows)));
@@ -160,6 +178,11 @@ function solveOnce(rgba, settings, opts = {}) {
     if (!pk) notes.push('no row layout fits the spacing limits: one span, bar to bar');
     else if (pk.forced) notes.push(`the longest span (${len(s.maxSpan)}) needs ${pk.count} rows, more than the ${s.maxRows} allowed`);
   }
+
+  // the combs that cast shadows: every shared row with combs; with pins, the two bars
+  const combYs = s.hold === 'combs' && rows ? rows : [0, H];
+  const zcAll = slope ? shadeCutoffs(combYs.map((y) => ({ y, zf: zfAt(y) })), n, dy, s) : null;
+  const zc = shadeOn ? zcAll : null;
 
   progress('choosing angles');
   const ribbons = [];
@@ -178,17 +201,18 @@ function solveOnce(rgba, settings, opts = {}) {
     // when it leans on its left neighbour (alignment, always with the toggle), or
     // takes spread error with its own bracket heights; shared rows without
     // alignment keep the plain one
-    if ((carry && !rows) || al.prev) guide = idealPath(Llut[i], LtEff, dy, kmaxDeg, al);
+    const so = shadeOn ? { shade: shadeModels[i], zc } : {};
+    if ((carry && !rows) || al.prev || shadeOn) guide = idealPath(Llut[i], LtEff, dy, kmaxDeg, { ...al, ...so });
     if (!ys) {
       const pk = placeKnots(spanCosts(frame, Llut[i], LtEff, guide, kmaxDeg, grid), grid, Math.max(0, Math.round(s.maxPerRibbon)));
       ys = pk ? [0, ...pk.q.map((q) => q * dy), H] : [0, H];
       if (pk && pk.forced) forcedRibbons++;
     }
     const centers = ys.map((y) => pathAt(guide, y / dy - 0.5));
-    const { angles } = solveAngles(frame, Llut[i], LtEff, ys, centers, kmaxDeg, al);
+    const { angles } = solveAngles(frame, Llut[i], LtEff, ys, centers, kmaxDeg, { ...al, ...so });
     const knots = ys.map((y, k) => ({ y, a: angles[k] }));
     const th = pathFromKnots(frame, knots);
-    const L = pathLightness(Llut[i], th);
+    const L = pathLightness(Llut[i], th, so.shade, so.zc);
     if (s.diffusion > 0) {
       const resid = new Float64Array(n);
       for (let j = 0; j < n; j++) resid[j] = LtEff[j] - L[j];
@@ -214,9 +238,20 @@ function solveOnce(rgba, settings, opts = {}) {
     r.knots = r.knots.map((k) => ({ y: k.y, a: m(k.a) }));
     r.th = r.th.map(m);
     r.ideal = r.ideal.map(m);
-    r.L = pathLightness(Llut[i], r.th);
+    r.L = pathLightness(Llut[i], r.th, shadeOn ? shadeModels[i] : null, zc);
     r.Lideal = pathLightness(Llut[i], r.ideal);
   });
+
+  if (zcAll && s.hold === 'combs') {
+    let n0 = 0;
+    for (const v of zcAll) if (v >= 0) n0++;
+    const pct = Math.round((100 * n0) / n);
+    if (pct > 0) {
+      notes.push(shadeOn
+        ? `comb shadows cover ${pct}% of the ribbons' height (face-on): the solver allows for them`
+        : `solid combs would shade ${pct}% of the ribbons' height (face-on) under this light: tick "Model comb shadows", use clear combs, or light from lower down`);
+    }
+  }
 
   progress('checking');
   const stats = planStats(ribbons, model, kmaxDeg, n, dy, s.pitch);
@@ -228,6 +263,7 @@ function solveOnce(rgba, settings, opts = {}) {
   if (stats.rateUse > 1 + 1e-6) notes.push(`a span twists at ${Math.round(stats.rateUse * 100)}% of the limit`);
   if (quarterTurnLength(s) > H) notes.push(`a quarter turn needs ${len(quarterTurnLength(s))}, longer than the ribbons: no ribbon can go from white to black`);
   return {
+    combShade: shadeOn ? { zc, W: backdropDistance(s), reach: s.ribbonW / 2 } : null,
     piece: { W, H }, imageRect: geo.imageRect, n, dy, xv,
     ribbons, rows, layout, hold: s.hold, range, kmaxDeg, quarterTurn: quarterTurnLength(s),
     curvePts, s, stats, notes,

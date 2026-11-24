@@ -60,7 +60,19 @@ pipeline directly.
      the span's peak rate is within κmax. Twist directions fall out of it.
    Ribbons are solved left to right; each passes a share ("Spread error") of
    its vertically blurred lightness error to the next, which the eye mixes.
-8. **Twist directions** (`core/align.js`): during the solve, each ribbon's
+8. **Comb shadows** (optional, `combShadows`; `core/combshade.js`): a solid
+   comb lit from above shades what lies below it and behind its front edge.
+   At a sample Δy below a comb's underside the cut-off is zc = D/2 − Δy·Lz/Ly;
+   ribbon cross-section below zc loses its direct light, and the backdrop does
+   where zc reaches the back wall. The solver uses this model wherever a
+   shadow reaches (ideal path, angle DP, and in bunched placement each
+   candidate span's own comb); everywhere else the LUT. Each comb's own depth
+   comes from a first solve, so this always runs two. Measured on a flat grey
+   (tests/core.combshade.js): blended error 2.12 → 0.75 and squared error
+   lower; per-sample absolute error can rise, because the twist limit spreads a
+   band's shortfall over its span. Not with a measured curve. The Preview draws
+   the shading; the 3D view shows the real shadows either way.
+9. **Twist directions** (`core/align.js`): during the solve, each ribbon's
    ideal path and angle DP carry a small cost (`solve.alignCost`, ALIGN_K per
    sample) for turning differently from (Align twists on, +1) or alike to
    (off, −1) the ribbon on its left. After it, each ribbon is kept or mirrored whole about
@@ -69,7 +81,7 @@ pipeline directly.
    on a viewer 1 m to either side (`offAxisDistortion`): on gives the fewest
    stripes and a steadier blend than no preference; off the steadiest blend
    but the most stripes. The Preview's Viewer slider shows any sideways position.
-9. **Stats**: tone error (lightness ×100, sample by sample) and "as seen"
+10. **Stats**: tone error (lightness ×100, sample by sample) and "as seen"
    (after mixing neighbours 1:2:1 and a pitch down the ribbon), with the ideal
    path's for comparison; brackets; the worst span's peak rate and coil ratio.
 
