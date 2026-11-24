@@ -126,7 +126,7 @@ export function run() {
     if (!(c.outline.length > 4)) single = false;
     const A = Math.abs(polyArea(c.outline)), Ab = Math.abs(polyArea(c.bar)), As = Math.abs(polyArea(c.stem));
     if (!(A > Ab + 0.5 * As && A < Ab + As)) areaOK = false;
-    if (Math.abs(Math.min(...c.stem.map((q) => q[1])) + 45 + BOX_WALL) > 1e-9) toWall = false;
+    if (Math.abs(Math.min(...c.stem.map((q) => q[1])) + 45 + 10 + BOX_WALL) > 1e-9) toWall = false;
     if (selfCrosses(c.outline)) single = false;
   }
   check('every angle: the stem joins the bar', joined);

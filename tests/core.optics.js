@@ -52,7 +52,7 @@ export function run() {
     'from the side, shadows show in the gaps. A ribbon lying along the light casts only a sliver; one edge-on to the viewer can be broadside to a side light.');
   const L = (az, el = 0) => [Math.cos(el * Math.PI / 180) * Math.sin(az * Math.PI / 180), Math.cos(el * Math.PI / 180) * Math.cos(az * Math.PI / 180)];
   const ws = { ...plain, slotClear: 0.6, combMargin: 8 };
-  check('combs: the backdrop is half a comb depth behind (18.3 mm)', Math.abs(backdropDistance(ws) - 18.3) < 1e-9 && backdropDistance({ ...ws, hold: 'pins', standoff: 45 }) === 45);
+  check('combs: the backdrop is half a comb depth behind (18.3 mm); pins: the stand-off past a 20 mm ribbon\'s edge (45 + 10)', Math.abs(backdropDistance(ws) - 18.3) < 1e-9 && backdropDistance({ ...ws, hold: 'pins', standoff: 45 }) === 55);
   check('light from the viewer\'s direction: no shadow shows', backdropLit(0, 0, ws, ...L(0)) === 1 && Math.abs(backdropLit(30, 20, ws, ...L(20)) - 1) < 1e-12);
   // by hand, face-on: ribbons cover [−10, 10] of every 30 mm, the gap is [10, 20]; the shadows are the
   // same 20 mm shifted left by 18.3·tan(az) -- at 15° that is 4.90 mm, so they cover [15.10, 20] of the gap

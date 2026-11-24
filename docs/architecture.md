@@ -110,7 +110,8 @@ viewer, ribbons' centre lines at z = 0.
   cutter bed, labelled ribbon.bracket along the stem, and the back panel with a
   slot for each stem.
 - Box: back, sides, top and bottom, open at the front. Its depth is the combs';
-  the combs mount to its sides; with pins the back wall is the stand-off away.
+  the combs mount to its sides; with pins the back wall is the stand-off past
+  a ribbon turned end-on (w/2 + stand-off behind the centre line).
 - Shading is the optics model (Lambert + sheen, same light, same exposure), so
   the design-viewpoint preset matches the 2D Preview.
 - Shadows: a shadow map (RGBA-packed depth, WebGL 1), orthographic from the

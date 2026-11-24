@@ -627,10 +627,11 @@ function updateNotes() {
     }
   }
   if (plan && state.set.hold === 'pins') {
-    // a clip turned end-on to the wall reaches back half its length, its corners a little more
+    // a clip turned end-on reaches back past the ribbon's edge by the slot's clearance, the clip's wall
+    // and a little more at its corners; the stem needs some length beyond that
     const st = state.set, slotW = Math.max(st.minSlot, st.thickness + st.slotClear);
-    const reach = Math.hypot((st.ribbonW + st.slotClear) / 2 + st.clipWall, slotW / 2 + st.clipWall);
-    if (st.standoff < reach + 2) items.push(`the pin stand-off (${lenTxt(st.standoff)}) leaves a clip turned end-on (it reaches back ${lenTxt(reach)}) almost no stem: make it ${lenTxt(reach + 10)} or more`);
+    const past = Math.hypot((st.ribbonW + st.slotClear) / 2 + st.clipWall, slotW / 2 + st.clipWall) - st.ribbonW / 2;
+    if (st.standoff < past + 2) items.push(`the pin stand-off (${lenTxt(st.standoff)}) leaves a clip turned end-on (it reaches ${lenTxt(past)} past the ribbon's edge) almost no stem: make it ${lenTxt(past + 10)} or more`);
   }
   $('combNote').textContent = combMsg;
   $('notes').innerHTML = items.map((t) => `<li>${escapeHtml(t)}</li>`).join('');

@@ -39,7 +39,7 @@
 // approximation for the others (their lighting differs slightly).
 
 import { toLinear } from './color.js';
-import { combDepth } from './fab.js';
+import { combDepth, pinWallDepth } from './fab.js';
 
 const RAD = Math.PI / 180;
 export const LUT_STEP = 0.5;                 // degrees per LUT entry
@@ -88,13 +88,14 @@ export function pitchModel(th, al, s, ybg = backdropY(s)) {
 
 /**
  * How far behind the ribbons' centre lines the backdrop is: the box's back
- * wall, against the deepest comb (or the pin stand-off). The deepest comb
+ * wall, against the deepest comb (or, with pins, the stand-off past a ribbon
+ * turned end-on: fab.pinWallDepth). The deepest comb
  * depends on the solved angles, so the pipeline solves once with the deepest
  * a comb can be, then again with `backDepth`, the deepest that came out.
  */
 export const backdropDistance = (s) => {
   const D = s.backDepth > 0 ? s.backDepth : combDepth(s);
-  return s.hold === 'pins' ? Math.max(s.standoff, D / 2) : D / 2;
+  return s.hold === 'pins' ? Math.max(pinWallDepth(s), D / 2) : D / 2;
 };
 
 /**

@@ -22,10 +22,10 @@
 //   back wall (its tab buried in the back panel). Two prisms each.
 // - The box is open at the front: back, sides, top and bottom panels outside
 //   the combs' ends (the combs' tabs plug into the sides) and the bars. Its
-//   depth is the deepest comb's; with pins the back wall sits `standoff`
-//   behind the ribbons instead.
+//   depth is the deepest comb's; with pins the back wall sits the stand-off
+//   behind the ribbons' farthest edges instead (fab.pinWallDepth).
 
-import { slotRect, clipShapes, combLayout, combRowsOf, planDepth, combEnds, BOX_WALL } from './fab.js';
+import { slotRect, clipShapes, combLayout, combRowsOf, planDepth, combEnds, pinWallDepth, BOX_WALL } from './fab.js';
 
 export { BOX_WALL };
 
@@ -121,7 +121,7 @@ export function buildScene(plan, s) {
   const D = planDepth(plan, s), t = s.combThick;
   const pins = s.hold === 'pins';
   const zFront = D / 2;
-  const zBack = pins ? -Math.max(s.standoff, D / 2) : -D / 2;
+  const zBack = pins ? -Math.max(pinWallDepth(s), D / 2) : -D / 2;
   const [bx0, bx1] = combEnds(xs, s);
 
   // ribbons: a strip per ribbon, two triangles between stations

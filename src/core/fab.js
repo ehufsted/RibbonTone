@@ -321,7 +321,7 @@ export function planCombs(plan) {
 export function sidePanelPiece(plan) {
   const s = plan.s, H = plan.piece.H, T = BOX_WALL, t = s.combThick;
   const Dmax = planDepth(plan);
-  const zFront = Dmax / 2, zBack = s.hold === 'pins' ? -Math.max(s.standoff, Dmax / 2) : -Dmax / 2;
+  const zFront = Dmax / 2, zBack = s.hold === 'pins' ? -Math.max(pinWallDepth(s), Dmax / 2) : -Dmax / 2;
   const yTop = H + t / 2 + T, yBot = -t / 2 - T;
   const w = zFront - zBack, h = yTop - yBot;
   const cuts = [{ kind: 'poly', pts: [[0, 0], [w, 0], [w, h], [0, h]] }], engrave = [];
@@ -352,6 +352,13 @@ export function calibrationCombs(s, step = 15) {
   return { pieces: [...top.pieces, ...bot.pieces], angles, web: top.web };
 }
 
+/**
+ * With pins, how far behind the ribbons' centre line the back wall is: the
+ * stand-off is the least gap between a ribbon's edge and the wall, and an edge
+ * comes nearest when the ribbon is turned end-on, half its width back.
+ */
+export const pinWallDepth = (s) => s.standoff + s.ribbonW / 2;
+
 /** The box's panels, mm (also the length of the clip stems' tabs through the back panel). */
 export const BOX_WALL = 6;
 
@@ -360,7 +367,7 @@ export const polyArea = (P) => P.reduce((a, [x, y], i) => { const [u, v] = P[(i 
 
 /**
  * One pin clip's shapes, centred on the ribbon, in (x, z): z toward the viewer
- * (the wall is at z = −standoff). All counter-clockwise in the drawing's sense.
+ * (the wall is at z = −pinWallDepth). All counter-clockwise in the drawing's sense.
  * @returns {{bar, slot, stem, outline, reach, stemW, join}}
  *   reach: how far the clip reaches toward the wall along the stem's line;
  *   join: the stem's furthest point toward the viewer (z); outline: bar ∪ stem, the cut path
@@ -375,7 +382,7 @@ export function clipShapes(th, s) {
   const stemW = 1.6 * b;
   // how far the bar reaches toward the wall along the stem's line (−z)
   const reach = Math.min(Math.abs(uz) > 1e-9 ? a / Math.abs(uz) : Infinity, Math.abs(vz) > 1e-9 ? b / Math.abs(vz) : Infinity);
-  const wallZ = -s.standoff - BOX_WALL;
+  const wallZ = -pinWallDepth(s) - BOX_WALL;
   // The stem's end is cut parallel to the face of the clip it meets -- the long
   // side, or the short end when the clip is turned nearly end-on -- half a clip
   // wall short of the slot. That line separates stem and slot, so the gap holds
