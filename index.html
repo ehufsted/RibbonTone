@@ -133,6 +133,9 @@
     }
     .stage { height: 60vh; min-height: 240px; }
     .viewbar .spacer { display: none; }
+    /* the view tabs and each view's controls wrap: on a phone they are wider than the screen */
+    .viewbar .seg, .distctl { flex-wrap: wrap; }
+    .viewbar .seg button { flex: 1 0 auto; }
     .row label { flex: 0 0 100px; }
     header { position: sticky; top: 0; z-index: 2; background: var(--bg); }
     header .sub { display: none; }
@@ -271,7 +274,7 @@
         <div class="row" data-for="bunched perRibbon"><label for="maxSpan">Longest span</label><input type="number" id="maxSpan" class="len" min="0" step="any"><span class="unit u"></span></div>
         <div class="row" id="standoffRow" title="pins: the least gap between a ribbon's edge and the back wall (when the ribbon is turned end-on); each clip's stem runs back to the wall"><label for="standoff">Pin stand-off</label><input type="number" id="standoff" class="len" min="0" step="any"><span class="unit u"></span></div>
         <div class="row" title="how much of each ribbon's tone error the next ribbon makes up for (the eye mixes neighbours)"><label for="diffusion">Spread error</label><input type="range" id="diffusion" min="0" max="1" step="0.05"><span class="val" id="diffusionVal"></span></div>
-        <label class="check" title="solid combs shade a band of ribbon and backdrop below them when lit from above: model it, so the solver turns ribbons to make up for it (and bunched rows avoid where it costs most). Off: as for clear combs"><input type="checkbox" id="combShadows"> Model comb shadows (solid combs)</label>
+        <label class="check" id="combShadowsLabel"><input type="checkbox" id="combShadows"> Model comb shadows (solid combs)</label>
         <label class="check" title="on: neighbouring ribbons turn the same way, so a viewer walking past sees few stripes and a steady picture. Off: they turn opposite ways, so the blended tone holds best from afar but stripes show up close as the viewer moves"><input type="checkbox" id="alignTwists"> Align twists (coherent for a passing viewer)</label>
         <ul class="notes" id="notes"></ul>
       </div>
@@ -341,8 +344,8 @@
         <select id="combLook" title="how the combs and pin tabs are drawn"><option value="solid">Solid combs</option><option value="clear">Clear combs</option></select>
         <input type="color" id="combColor" title="solid comb colour">
       </span>
-      <span class="distctl" id="walkCtl" title="see the piece as a viewer this far to the side of the design viewpoint does (double-click: back to the design viewpoint)">
-        <label>Viewer <input type="range" id="walkMm" min="-2000" max="2000" step="50" value="0"> <span id="walkVal">design</span></label>
+      <span class="distctl" id="walkCtl" title="see the piece as a viewer this many degrees round from the design viewpoint does, at the same distance from the piece's centre (in the Distance view, the distance chosen there); double-click: back to the design viewpoint">
+        <label>Viewer <input type="range" id="walkDeg" min="-75" max="75" step="1" value="0"> <span id="walkVal">design</span></label>
       </span>
       <span class="distctl" id="distControls" hidden>
         <label>From <input type="range" id="distView" min="0.5" max="30" step="0.5" value="4"> <span id="distViewVal">4 m</span></label>

@@ -200,7 +200,9 @@ export function createView3D(canvas) {
   const lit = compile(gl, VS, FS), line = compile(gl, LINE_VS, LINE_FS), depth = compile(gl, DEPTH_VS, DEPTH_FS);
   let buffers = null, scene = null;
   // the shadow map: an RGBA texture holding packed depth, and its framebuffer
-  const SIZE = Math.min(4096, gl.getParameter(gl.MAX_TEXTURE_SIZE), gl.getParameter(gl.MAX_RENDERBUFFER_SIZE));
+  // 4096² (64 MB) only on GPUs that take much larger textures: phones and small GPUs get 2048²
+  const big = gl.getParameter(gl.MAX_TEXTURE_SIZE) >= 8192 && gl.getParameter(gl.MAX_RENDERBUFFER_SIZE) >= 8192;
+  const SIZE = Math.min(big ? 4096 : 2048, gl.getParameter(gl.MAX_TEXTURE_SIZE), gl.getParameter(gl.MAX_RENDERBUFFER_SIZE));
   const shadowTex = gl.createTexture();
   gl.bindTexture(gl.TEXTURE_2D, shadowTex);
   gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, SIZE, SIZE, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);

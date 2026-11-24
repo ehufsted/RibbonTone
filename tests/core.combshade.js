@@ -64,6 +64,8 @@ export function run() {
     return a / (c || 1);
   };
   check('in the bands, ribbons turn more face-on to make up for the lost light', faceOn(on) < faceOn(off), `${num(faceOn(on), 1)}° vs ${num(faceOn(off), 1)}° from face-on`);
+  const glass = runPipeline(grey, { ...base, combShadows: true, combLook: 'clear' });
+  check('clear combs: nothing modelled, with a note', glass.combShade === null && glass.notes.some((t) => /clear combs cast almost no shadow/.test(t)));
   const level = runPipeline(grey, { ...base, combShadows: true, lightEl: 0 });
   check('a level light: nothing to model', level.combShade === null);
   const curved = runPipeline(grey, { ...base, combShadows: true, curveOn: true, curve: '0 200\n90 20' });

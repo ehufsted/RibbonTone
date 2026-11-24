@@ -130,7 +130,8 @@ function solveOnce(rgba, settings, opts = {}) {
   // comb shadows (core/combshade.js): a light from above and in front, and the model, not a measured curve
   const slope = shadeSlope(s);
   if (s.combShadows && curvePts) notes.push('comb shadows are not modelled with a measured curve: it cannot be split into direct and ambient light');
-  const shadeOn = !!(s.combShadows && slope && !curvePts);
+  if (s.combShadows && s.combLook === 'clear') notes.push('clear combs cast almost no shadow: comb shadows are not modelled');
+  const shadeOn = !!(s.combShadows && slope && !curvePts && s.combLook !== 'clear');
   // a comb's front edge: its own depth from the first solve, else the deepest a comb can be
   const zfAt = (y) => {
     const hit = (s.rowDepths || []).find((e) => Math.abs(e.y - y) < 1);
@@ -249,7 +250,8 @@ function solveOnce(rgba, settings, opts = {}) {
     if (pct > 0) {
       notes.push(shadeOn
         ? `comb shadows cover ${pct}% of the ribbons' height (face-on): the solver allows for them`
-        : `solid combs would shade ${pct}% of the ribbons' height (face-on) under this light: tick "Model comb shadows", use clear combs, or light from lower down`);
+        : s.combLook === 'clear' ? `solid combs would shade ${pct}% of the ribbons' height (face-on); clear ones hardly any`
+          : `solid combs would shade ${pct}% of the ribbons' height (face-on) under this light: tick "Model comb shadows", use clear combs, or light from lower down`);
     }
   }
 

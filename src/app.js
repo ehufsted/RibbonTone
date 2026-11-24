@@ -59,8 +59,8 @@ const state = {
   scene: null,          // core/scene.js, built when the 3D view needs it
   cam: null,            // the 3D view's orbit camera
   idealSlices: null,
-  walk: 0,              // the Preview's viewer, shifted sideways from the design viewpoint, mm
-  walkSlices: new Map(), // core/render.js slices for a shifted viewer, by view
+  walkDeg: 0,           // the viewer, turned this far about the piece's centre from the design viewpoint (Viewer slider)
+  walkSlices: new Map(), // core/render.js slices for a moved viewer, by view and position
   targetCanvas: null,
   jobId: 0,
   pending: false,
@@ -179,7 +179,9 @@ function showFields() {
 
 function changed(id) {
   save();
-  if (FAB_ONLY.has(id) || VIEW_ONLY.has(id)) {
+  // the comb look decides whether comb shadows are modelled, so with that on it re-solves
+  if (id === 'combLook') showLayout();
+  if (FAB_ONLY.has(id) || (VIEW_ONLY.has(id) && !(id === 'combLook' && state.set.combShadows))) {
     if (FAB_ONLY.has(id)) { updateNotes(); state.scene = null; }
     if (state.view === 'view3d') paint();
     return;
@@ -266,6 +268,12 @@ function showLayout() {
   $('layoutBlurb').textContent = BLURBS[layout] + (s.hold === 'combs' ? ' Combs hold whole rows, so each ribbon\'s own heights need wall pins.' : '');
   $('curveBody').hidden = !s.curveOn;
   $('standoffRow').hidden = s.hold !== 'pins';
+  // clear combs cast almost no shadow: nothing to model
+  const clear = s.combLook === 'clear';
+  $('combShadows').disabled = clear;
+  $('combShadowsLabel').style.opacity = clear ? 0.5 : '';
+  $('combShadowsLabel').title = clear ? 'clear combs (the 3D view\'s comb look) cast almost no shadow, so there is nothing to model'
+    : 'solid combs shade a band of ribbon and backdrop below them when lit from above: model it, so the solver turns ribbons to make up for it (and bunched rows avoid where it costs most)';
   $('clipFab').hidden = s.hold !== 'pins';
   $('combFab').hidden = false;
 }
@@ -455,26 +463,40 @@ function drawBrackets(ctx, plan, k) {
 }
 
 /**
- * The plan as a viewer `state.walk` mm to the side sees it: the same ribbons,
- * each seen from its new direction. The design viewpoint is walk 0.
+ * Where the viewer stands: the design viewpoint turned `state.walkDeg` about
+ * the piece's centre, keeping its distance from the centre -- in the Distance
+ * view, the distance chosen there.
+ * @returns {{xv: number, distM: number}}  across the piece, mm; out from the wall, m
  */
+function viewerAt(plan) {
+  const xc = plan.piece.W / 2, off = plan.xv - xc, dz = plan.s.distM * 1000;
+  const R = state.view === 'distance' ? parseFloat($('distView').value) * 1000 : Math.hypot(off, dz);
+  const phi = Math.atan2(off, dz) + (state.walkDeg * Math.PI) / 180;
+  return { xv: xc + R * Math.sin(phi), distM: (R * Math.cos(phi)) / 1000 };
+}
+
+/** The plan as the viewer (viewerAt) sees it: the same ribbons, each seen from its new direction. */
 function walked(plan) {
-  if (!state.walk) return plan;
-  const xv = plan.xv + state.walk;
-  return { ...plan, xv, ribbons: plan.ribbons.map((r) => ({ ...r, alpha: viewAngle(r.x, xv, plan.s.distM) })) };
+  const v = viewerAt(plan);
+  if (Math.abs(v.xv - plan.xv) < 1e-6 && Math.abs(v.distM - plan.s.distM) < 1e-9) return plan;
+  return {
+    ...plan, xv: v.xv, s: { ...plan.s, distM: v.distM },
+    ribbons: plan.ribbons.map((r) => ({ ...r, alpha: viewAngle(r.x, v.xv, v.distM) })),
+  };
 }
 
 /** The slices for a view (the bracketed or the ideal path), from where the viewer stands. */
 function slicesFor(plan, which) {
-  if (!state.walk) {
+  const w = walked(plan);
+  if (w === plan) {
     if (which === 'th') return state.slices;
     state.idealSlices ||= ribbonSlices(plan, 'ideal');
     return state.idealSlices;
   }
-  const key = `${which}@${state.walk}`;
+  const key = `${which}@${w.xv.toFixed(2)},${w.s.distM.toFixed(5)}`;
   if (!state.walkSlices.has(key)) {
     if (state.walkSlices.size > 8) state.walkSlices.clear();
-    state.walkSlices.set(key, ribbonSlices(walked(plan), which));
+    state.walkSlices.set(key, ribbonSlices(w, which));
   }
   return state.walkSlices.get(key);
 }
@@ -504,9 +526,9 @@ function paint() {
   const ctx = $('view').getContext('2d');
   ctx.setTransform(k, 0, 0, k, 0, 0);
   drawView(ctx, plan, state.view, k);
-  const shifted = state.walk && (state.view === 'preview' || state.view === 'ideal');
+  const shifted = state.walkDeg && (state.view === 'preview' || state.view === 'ideal');
   $('hint').textContent = shifted
-    ? `as a viewer ${lenTxt(Math.abs(state.walk))} ${state.walk > 0 ? 'right' : 'left'} of the design viewpoint sees it (double-click the slider to go back)`
+    ? `as a viewer ${Math.abs(state.walkDeg)}° ${state.walkDeg > 0 ? 'right' : 'left'} of the design viewpoint sees it, at the same distance from the piece's centre (double-click the slider to go back)`
     : HINTS[state.view] || '';
 }
 
@@ -527,9 +549,12 @@ function paintDistance(plan) {
   const D = parseFloat($('distView').value);
   $('distViewVal').textContent = `${D} m`;
   const { W, H } = plan.piece;
-  const tw = Math.max(8, Math.min(3000, Math.round(apparentPx(W, D))));
-  const th = Math.max(8, Math.round((tw * H) / W));
-  const k = Math.min(8, (4 * tw) / W, Math.sqrt(12e6 / (W * H)));
+  const full = Math.max(8, Math.min(3000, Math.round(apparentPx(W, D))));
+  const th = Math.max(8, Math.round((full * H) / W));
+  // seen from off to the side, the piece (and the image it stands for) looks narrower by cos φ
+  const v = viewerAt(plan), dz = v.distM * 1000;
+  const tw = Math.max(8, Math.round(full * (dz / Math.hypot(v.xv - W / 2, dz))));
+  const k = Math.min(8, (4 * full) / W, Math.sqrt(12e6 / (W * H)));
   const hw = Math.max(1, Math.round(W * k)), hh = Math.max(1, Math.round(H * k));
   const render = (view) => {
     const c = document.createElement('canvas');
@@ -561,7 +586,7 @@ function paintDistance(plan) {
   put(seen, 0);
   if (compare) put(tgt, tw + gap);
   const merge = (plan.s.pitch * SCREEN_M) / (25.4 / 96);
-  $('hint').textContent = `as seen from ${D} m, if you sit ${SCREEN_M} m from a 96 dpi screen${compare ? ' (the target on the right)' : ''}: ` +
+  $('hint').textContent = `as seen from ${D} m${state.walkDeg ? `, ${Math.abs(state.walkDeg)}° ${state.walkDeg > 0 ? 'right' : 'left'} of the design viewpoint` : ''}, if you sit ${SCREEN_M} m from a 96 dpi screen${compare ? ' (the target on the right)' : ''}: ` +
     `ΔE ${meanDeltaE(seen, tgt).toFixed(1)} pixel for pixel; ` +
     (D < merge ? `the ribbons still show as stripes (they merge from about ${Math.round(merge)} m)` : 'the ribbons have merged into tone');
 }
@@ -629,7 +654,10 @@ function paint3D(plan) {
   }
   if (!state.cam) state.cam = camPreset('quarter');
   draw3D();
-  $('hint').textContent = 'drag to orbit · right- or shift-drag to pan · wheel or pinch to zoom';
+  // touch screens get their own words
+  $('hint').textContent = window.matchMedia && window.matchMedia('(pointer: coarse)').matches
+    ? 'drag to orbit · two fingers to pan and pinch to zoom'
+    : 'drag to orbit · right- or shift-drag to pan · wheel or pinch to zoom';
 }
 
 function camPreset(name) {
@@ -738,8 +766,8 @@ function bindExports() {
     if (!state.plan) return;
     if (state.view === 'view3d') { draw3D(); $('view3d').toBlob((b) => downloadFile(b, `${base()}-3d.png`, 'image/png')); return; }
     // a Preview from a shifted viewer says so in its name
-    const where = state.walk && state.view !== 'target' && state.view !== 'diff' && state.view !== 'brackets'
-      ? `-viewer${state.walk > 0 ? '+' : '-'}${Math.round(Math.abs(state.walk))}mm` : '';
+    const where = state.walkDeg && state.view !== 'target' && state.view !== 'diff' && state.view !== 'brackets'
+      ? `-viewer${state.walkDeg > 0 ? '+' : '-'}${Math.abs(state.walkDeg)}deg` : '';
     const p = state.plan, k = 2400 / Math.max(p.piece.W, p.piece.H);
     const c = document.createElement('canvas');
     c.width = Math.round(p.piece.W * k); c.height = Math.round(p.piece.H * k);
@@ -892,11 +920,11 @@ function bindViews() {
   $('distCompare').addEventListener('change', paint);
   let walkTimer = null;
   const showWalk = () => {
-    const v = state.walk;
-    $('walkVal').textContent = v === 0 ? 'design' : `${v > 0 ? '+' : '−'}${lenTxt(Math.abs(v))}`;
+    const v = state.walkDeg;
+    $('walkVal').textContent = v === 0 ? 'design' : `${v > 0 ? '+' : '−'}${Math.abs(v)}°`;
   };
-  $('walkMm').addEventListener('input', () => { state.walk = parseFloat($('walkMm').value) || 0; showWalk(); clearTimeout(walkTimer); walkTimer = setTimeout(paint, 60); });
-  $('walkMm').addEventListener('dblclick', () => { $('walkMm').value = 0; state.walk = 0; showWalk(); paint(); });
+  $('walkDeg').addEventListener('input', () => { state.walkDeg = parseFloat($('walkDeg').value) || 0; showWalk(); clearTimeout(walkTimer); walkTimer = setTimeout(paint, 60); });
+  $('walkDeg').addEventListener('dblclick', () => { $('walkDeg').value = 0; state.walkDeg = 0; showWalk(); paint(); });
   showWalk();
   $('zoom').addEventListener('change', paint);
   let resizeTimer = null;
