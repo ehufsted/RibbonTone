@@ -290,6 +290,16 @@
           <label class="check" title="cut each comb along its centre line, so ribbons are laid into notches and clamped instead of threaded"><input type="checkbox" id="splitComb"> Split combs for assembly</label>
           <p class="note" id="combNote"></p>
         </div>
+        <div class="group" id="clipFab" hidden>
+          <div class="row" title="clip material around the slot, on every side; the stem is a little narrower"><label for="clipWall">Clip wall</label><input type="number" id="clipWall" class="len" min="0" step="any"><span class="unit u"></span></div>
+          <div class="buttons">
+            <button id="exportClipsSVG" title="one flat T per bracket: a slotted clip at the ribbon's angle on a stem to the wall; packed across the cutter bed">Pin clips SVG</button>
+            <button id="exportClipsDXF">Pin clips DXF</button>
+            <button id="exportPanelSVG" title="the box's back panel with a slot for every clip's stem">Back panel SVG</button>
+            <button id="exportPanelDXF">Back panel DXF</button>
+          </div>
+          <p class="note">Each clip's stem runs back through the back panel as a tab; the clips are labelled ribbon.bracket on the stem.</p>
+        </div>
         <div class="buttons">
           <button class="primary" id="exportCombsSVG" title="every comb row, stacked on one sheet: cut red, engrave blue">Combs SVG</button>
           <button id="exportCombsDXF">Combs DXF</button>

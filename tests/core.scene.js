@@ -66,11 +66,11 @@ export function run() {
   const ps = buildScene(pp, pp.s);
   const inner = pp.ribbons.reduce((a, q) => a + q.knots.length - 2, 0);
   check('pins: only the two bars are combs', ps.combs.length === 2);
-  check(`pins: one tab per bracket between the bars (${inner})`, ps.tabs.pos.length === inner * 108);
-  check('pins: one rod per tab, from the back wall (45 mm behind the ribbons)', ps.rods.pos.length === inner * 10 * 18 && Math.abs(extent(ps.rods.pos, 2)[0] + 45) < 1e-4,
-    `rods reach z = ${num(extent(ps.rods.pos, 2)[0], 1)}`);
+  check(`pins: one clip per bracket between the bars (${inner}), two prisms of at least 12 triangles each`, ps.clips.pos.length >= inner * 2 * 12 * 9 && ps.clips.pos.length <= inner * 2 * 16 * 9);
+  check('pins: the clips\' stems reach into the back panel (45 mm + the panel behind the ribbons)', Math.abs(extent(ps.clips.pos, 2)[0] + 45 + BOX_WALL) < 1e-4,
+    `stems reach z = ${num(extent(ps.clips.pos, 2)[0], 1)}`);
   check('pins: the box\'s back wall is the stand-off behind', Math.abs(ps.zBack + 45) < 1e-9 && Math.abs(extent(ps.box.pos, 2)[0] + 45 + BOX_WALL) < 1e-4);
-  check('pins: tabs wind counter-clockwise too', windingOK(ps.tabs));
+  check('pins: clips wind counter-clockwise too', windingOK(ps.clips));
 
   section('core.scene: settings and camera', 'The back wall\'s distance feeds the solver (backdrop shadows), so the settings that set it ' +
     '(stand-off, comb margin, slot clearance) must re-solve, not just redraw. The orbit camera\'s frame must stay orthonormal and turn ' +

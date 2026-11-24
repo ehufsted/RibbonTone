@@ -1,5 +1,5 @@
 // The piece as 3D geometry, for the 3D view: ribbons, combs (or the top and
-// bottom bars with pin tabs and stand-off rods), and the black box. DOM-free:
+// bottom bars with pin clips), and the black box. DOM-free:
 // app/view3d.js draws it with WebGL, the harness checks it.
 //
 // WORLD SPACE, mm: x as on the piece (the viewer's right), y UP (the top bar
@@ -15,18 +15,19 @@
 //   is hidden, which looks exactly like a ribbon through a slot. Slot outlines
 //   are drawn on both faces so the angles read.
 // - With pins, the top and bottom bars are still combs; each bracket between
-//   them is a pin tab (a one-slot comb, square) on a stand-off rod from the
-//   back wall to the tab's back edge.
+//   them is a pin clip (core/fab.js clipShapes): a flat T of the same sheet,
+//   a narrow slotted crossbar turned to the ribbon's angle on a stem from the
+//   back wall (its tab buried in the back panel). Two prisms each.
 // - The box is open at the front: back, sides, top and bottom panels outside
 //   the combs' ends (the combs mount to the sides) and the bars. Its depth is
 //   the combs' depth; with pins the back wall sits `standoff` behind the
 //   ribbons instead.
 
-import { combDepth, slotRect } from './fab.js';
+import { combDepth, slotRect, clipShapes, BOX_WALL } from './fab.js';
+
+export { BOX_WALL };
 
 const RAD = Math.PI / 180;
-export const BOX_WALL = 6;   // mm, the box's panels
-export const ROD_R = 2;      // mm, pin stand-off rods
 
 /** A mesh under construction: flat arrays of triangle vertices and their normals. */
 function mesh() { return { pos: [], nrm: [] }; }
@@ -48,15 +49,34 @@ export function addBox(m, x0, x1, y0, y1, z0, z1) {
   quad(P(x0, y0, z0), P(x1, y0, z0), P(x1, y0, z1), P(x0, y0, z1), [0, -1, 0]);
 }
 
-/** A cylinder along z from z0 to z1 (open ends: the wall and the tab cover them). */
-function addRod(m, x, y, z0, z1, r, sides = 10) {
-  for (let k = 0; k < sides; k++) {
-    const a = (2 * Math.PI * k) / sides, b = (2 * Math.PI * (k + 1)) / sides, mid = (a + b) / 2;
-    const n = [Math.cos(mid), Math.sin(mid), 0];
-    const pa = [x + r * Math.cos(a), y + r * Math.sin(a)], pb = [x + r * Math.cos(b), y + r * Math.sin(b)];
-    tri(m, [pa[0], pa[1], z0], [pb[0], pb[1], z0], [pb[0], pb[1], z1], n);
-    tri(m, [pa[0], pa[1], z0], [pb[0], pb[1], z1], [pa[0], pa[1], z1], n);
+/** A triangle wound counter-clockwise seen from the side its normal points to. */
+function triOut(m, a, b, c, n) {
+  const ux = b[0] - a[0], uy = b[1] - a[1], uz = b[2] - a[2], vx = c[0] - a[0], vy = c[1] - a[1], vz = c[2] - a[2];
+  const d = (uy * vz - uz * vy) * n[0] + (uz * vx - ux * vz) * n[1] + (ux * vy - uy * vx) * n[2];
+  if (d < 0) tri(m, a, c, b, n); else tri(m, a, b, c, n);
+}
+
+/**
+ * A level prism: a convex polygon in (x, z), from height y0 to y1. Top and
+ * bottom are fans; each side's normal points away from the polygon's centre.
+ */
+export function addPrism(m, poly, y0, y1) {
+  const cx = poly.reduce((a, p) => a + p[0], 0) / poly.length, cz = poly.reduce((a, p) => a + p[1], 0) / poly.length;
+  const P = (q, y) => [q[0], y, q[1]];
+  for (let k = 1; k + 1 < poly.length; k++) {
+    triOut(m, P(poly[0], y1), P(poly[k], y1), P(poly[k + 1], y1), [0, 1, 0]);
+    triOut(m, P(poly[0], y0), P(poly[k], y0), P(poly[k + 1], y0), [0, -1, 0]);
   }
+  poly.forEach((q, k) => {
+    const r = poly[(k + 1) % poly.length];
+    let nx = r[1] - q[1], nz = -(r[0] - q[0]);
+    const l = Math.hypot(nx, nz) || 1;
+    nx /= l; nz /= l;
+    if (nx * ((q[0] + r[0]) / 2 - cx) + nz * ((q[1] + r[1]) / 2 - cz) < 0) { nx = -nx; nz = -nz; }
+    const n = [nx, 0, nz];
+    triOut(m, P(q, y0), P(r, y0), P(r, y1), n);
+    triOut(m, P(q, y0), P(r, y1), P(q, y1), n);
+  });
 }
 
 /**
@@ -89,7 +109,7 @@ export function ribbonStations(plan, r) {
  * The whole scene.
  * @param {object} plan  the pipeline's plan
  * @param {object} s  settings (the plan's, with any fabrication changes since)
- * @returns {{ribbons, box, combs: {pos, nrm, center}[], tabs, rods, lines, bounds, zBack, zFront, depth}}
+ * @returns {{ribbons, box, combs: {pos, nrm, center}[], clips, lines, bounds, zBack, zFront, depth}}
  *   each mesh: {pos: Float32Array, nrm: Float32Array}; lines: segment pairs
  */
 export function buildScene(plan, s) {
@@ -141,15 +161,15 @@ export function buildScene(plan, s) {
     return { ...pack(m), center: [(bx0 + bx1) / 2, yw, 0], row: i };
   });
 
-  // pin tabs and rods for every bracket between the bars
-  const tabs = mesh(), rods = mesh();
+  // a pin clip for every bracket between the bars: crossbar and stem
+  const clips = mesh();
   if (pins) {
-    const half = D / 2;
     for (const r of plan.ribbons) {
       for (let b = 1; b + 1 < r.knots.length; b++) {
-        const kn = r.knots[b], yw = Y(kn.y);
-        addBox(tabs, r.x - half, r.x + half, yw - t / 2, yw + t / 2, -half, half);
-        if (zBack < -half) addRod(rods, r.x, yw, zBack, -half, ROD_R);
+        const kn = r.knots[b], yw = Y(kn.y), sh = clipShapes(kn.a, s);
+        const at = (P) => P.map(([x, z]) => [r.x + x, z]);
+        addPrism(clips, at(sh.bar), yw - t / 2, yw + t / 2);
+        addPrism(clips, at(sh.stem), yw - t / 2, yw + t / 2);
         slotLines(r.x, yw, kn.a);
       }
     }
@@ -166,7 +186,7 @@ export function buildScene(plan, s) {
   addBox(box, bx0, bx1, yBot - T, yBot, zBack, zFront);
 
   return {
-    ribbons: pack(rib), combs, tabs: pack(tabs), rods: pack(rods), box: pack(box), lines: new Float32Array(lines),
+    ribbons: pack(rib), combs, clips: pack(clips), box: pack(box), lines: new Float32Array(lines),
     bounds: { x0: bx0 - T, x1: bx1 + T, y0: yBot - T, y1: yTop + T, z0: zBack - T, z1: zFront },
     zBack, zFront, depth: D,
   };

@@ -1,6 +1,6 @@
 import { section, check, num, plain, vRamp } from './runner.js';
 import { runPipeline } from '../src/pipeline.js';
-import { slotRect, planCombs, combRow, calibrationCombs, stackPieces, piecesSVG, piecesDXF, bracketList, bracketCSV, wallTemplateSVG, polyDistance, combDepth } from '../src/core/fab.js';
+import { clipShapes, unionConvex, polyArea, pinClipPieces, backPanelPiece, packPieces, BOX_WALL, slotRect, planCombs, combRow, calibrationCombs, stackPieces, piecesSVG, piecesDXF, bracketList, bracketCSV, wallTemplateSVG, polyDistance, combDepth } from '../src/core/fab.js';
 
 const edgeAngle = (p, q, yUp) => (Math.atan2(yUp ? q[1] - p[1] : p[1] - q[1], q[0] - p[0]) * 180) / Math.PI;
 
@@ -57,4 +57,51 @@ export function run() {
   const csv = bracketCSV(plan, 'in').trim().split('\n');
   check('CSV: a header and one line per bracket, in inches when asked', csv.length === knots + 1 && csv[0].includes('y_from_top_in'));
   check('wall template: one dial per bracket', (wallTemplateSVG(plan).match(/<circle /g) || []).length === knots);
+
+  section('core.fab: pin clips', 'A pin clip is a flat T: a slotted crossbar at the ribbon\'s angle and a stem straight back to the wall. ' +
+    'At every angle it must be one closed outline (the union of the two), the stem must join the bar yet stay half a clip wall from the slot, ' +
+    'and the stem must run on through the back panel.');
+  const ps = { ...s, standoff: 45, clipWall: 1.5, combThick: 3 };
+  let worst = Infinity, joined = true, single = true, areaOK = true, toWall = true;
+  for (let a = 0; a < 180; a += 1) {
+    const c = clipShapes(a, ps);
+    worst = Math.min(worst, polyDistance(c.stem, c.slot));
+    if (polyDistance(c.stem, c.bar) > 0) joined = false;
+    if (!(c.outline.length > 4)) single = false;
+    const A = Math.abs(polyArea(c.outline)), Ab = Math.abs(polyArea(c.bar)), As = Math.abs(polyArea(c.stem));
+    if (!(A > Ab + 0.5 * As && A < Ab + As)) areaOK = false;
+    if (Math.abs(Math.min(...c.stem.map((q) => q[1])) + 45 + BOX_WALL) > 1e-9) toWall = false;
+    if (selfCrosses(c.outline)) single = false;
+  }
+  check('every angle: the stem joins the bar', joined);
+  check('every angle: the stem stays at least half a clip wall (0.75 mm) from the slot', worst >= 0.75 - 1e-6, `least ${num(worst, 3)} mm`);
+  check('every angle: one simple outline, bigger than the bar and smaller than bar + stem', single && areaOK);
+  check('every angle: the stem reaches through the back panel', toWall);
+  const sq = [[0, 0], [2, 0], [2, 2], [0, 2]], sq2 = [[1, 1], [3, 1], [3, 3], [1, 3]];
+  check('union of two overlapping 2×2 squares: area 7', Math.abs(polyArea(unionConvex(sq, sq2)) - 7) < 1e-9, num(polyArea(unionConvex(sq, sq2)), 4));
+  check('union of disjoint squares: none', unionConvex(sq, [[5, 5], [6, 5], [6, 6], [5, 6]]) === null);
+
+  const pp = runPipeline(vRamp(40, 80), { ...ps, hold: 'pins', layout: 'perRibbon', maxPerRibbon: 4, minSpacing: 50, maxSpan: 400 });
+  const inner = pp.ribbons.reduce((a, r) => a + r.knots.length - 2, 0);
+  const clips = pinClipPieces(pp);
+  check(`one clip piece per bracket between the bars (${inner})`, clips.length === inner);
+  const clipSheet = packPieces(clips, 200);
+  check('clips packed across a 200 mm bed, none overlapping', clipSheet.W <= 200 + 1e-9 && clipSheet.placed.every((a, i) => clipSheet.placed.every((b, j) => j <= i ||
+    a.x + a.p.w <= b.x + 1e-9 || b.x + b.p.w <= a.x + 1e-9 || a.y + a.p.h <= b.y + 1e-9 || b.y + b.p.h <= a.y + 1e-9)), `${num(clipSheet.W, 1)} × ${num(clipSheet.H, 1)} mm`);
+  const panel = backPanelPiece(pp);
+  check('back panel: its outline and one stem slot per clip', panel.cuts.length === inner + 1);
+  const svgC = piecesSVG(clipSheet), dxfC = piecesDXF(clipSheet);
+  check('clip labels run along the stem: rotated in the SVG and the DXF', /transform="rotate\(-90 /.test(svgC) && /\n50\n90\n/.test(dxfC));
+}
+
+/** Does a closed polygon cross itself? */
+function selfCrosses(P) {
+  const n = P.length;
+  const cross = (a, b, c) => (b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0]);
+  for (let i = 0; i < n; i++) for (let j = i + 2; j < n; j++) {
+    if (i === 0 && j === n - 1) continue;
+    const a = P[i], b = P[(i + 1) % n], c = P[j], d = P[(j + 1) % n];
+    if (cross(a, b, c) * cross(a, b, d) < -1e-12 && cross(c, d, a) * cross(c, d, b) < -1e-12) return true;
+  }
+  return false;
 }

@@ -11,8 +11,8 @@
 // Every surface is lit on the side the eye sees (ribbons are white on both
 // faces).
 //
-// SHADOWS: a shadow map. The solid things (ribbons, solid combs and tabs,
-// rods, the box) are drawn from the light, orthographically over the scene,
+// SHADOWS: a shadow map. The solid things (ribbons, solid combs and clips,
+// the box) are drawn from the light, orthographically over the scene,
 // into a depth texture -- packed into RGBA, as WebGL 1 need not have depth
 // textures. A point is lit where it is no deeper than the map, sampled 3 x 3
 // for soft edges, and only the direct light and the sheen are shadowed (the
@@ -22,8 +22,8 @@
 // the scene, the light or what casts changes, not as the camera moves. Clear
 // combs cast none (they would, faintly).
 //
-// ORDER: solid things with the depth buffer (ribbons, box, rods, solid combs
-// and tabs), then the slot outlines, then clear combs and tabs blended without
+// ORDER: solid things with the depth buffer (ribbons, box, solid combs and
+// pin clips), then the slot outlines, then clear combs and clips blended without
 // writing depth, farthest first, each drawn back faces then front faces.
 
 const VS = `
@@ -228,7 +228,7 @@ export function createView3D(canvas) {
 
   function setScene(sc) {
     if (buffers) {
-      for (const k of ['ribbons', 'box', 'tabs', 'rods']) free(buffers[k]);
+      for (const k of ['ribbons', 'box', 'clips']) free(buffers[k]);
       buffers.combs.forEach(free);
       if (buffers.lines) gl.deleteBuffer(buffers.lines.buf);
     }
@@ -240,7 +240,7 @@ export function createView3D(canvas) {
       lines = { buf, count: sc.lines.length / 3 };
     }
     buffers = {
-      ribbons: upload(sc.ribbons), box: upload(sc.box), tabs: upload(sc.tabs), rods: upload(sc.rods),
+      ribbons: upload(sc.ribbons), box: upload(sc.box), clips: upload(sc.clips),
       combs: sc.combs.map(upload), lines,
     };
     shadowKey = '';
@@ -270,9 +270,9 @@ export function createView3D(canvas) {
     gl.depthMask(true);
     gl.useProgram(depth.p);
     gl.uniformMatrix4fv(depth.loc.uMVP, false, mvp);
-    const casters = [buffers.ribbons, buffers.rods];
+    const casters = [buffers.ribbons];
     if (o.box.on) casters.push(buffers.box);
-    if (o.comb.look !== 'clear') casters.push(...buffers.combs, buffers.tabs);
+    if (o.comb.look !== 'clear') casters.push(...buffers.combs, buffers.clips);
     for (const bf of casters) {
       if (!bf) continue;
       gl.bindBuffer(gl.ARRAY_BUFFER, bf.pos);
@@ -288,7 +288,7 @@ export function createView3D(canvas) {
   /**
    * @param {object} cam  {target, yaw, pitch, dist, fov}
    * @param {object} o  {light: [x,y,z], ambient, exposure, ribbon: {albedo, sheen, gloss},
-   *   box: {on, albedo}, comb: {look, albedo}, rodAlbedo, background}
+   *   box: {on, albedo}, comb: {look, albedo}, background, shadows}
    */
   function render(cam, o) {
     view.cam = cam; view.opts = o;
@@ -359,10 +359,9 @@ export function createView3D(canvas) {
     const CLEAR = { albedo: [0.82, 0.88, 0.92], sheen: 0.5, gloss: 60, alpha: 0.22 };
     draw(buffers.ribbons, o.ribbon.albedo, o.ribbon.sheen, o.ribbon.gloss, 1);
     if (o.box.on) draw(buffers.box, o.box.albedo, 0, 1, 1);
-    draw(buffers.rods, o.rodAlbedo, 0.3, 20, 1);
     if (!clear) {
       for (const c of buffers.combs) draw(c, o.comb.albedo, 0.05, 8, 1);
-      draw(buffers.tabs, o.comb.albedo, 0.05, 8, 1);
+      draw(buffers.clips, o.comb.albedo, 0.05, 8, 1);
     }
 
     if (buffers.lines) {
@@ -382,7 +381,7 @@ export function createView3D(canvas) {
       gl.depthMask(false);
       gl.enable(gl.CULL_FACE);
       const far1st = [...buffers.combs].sort((a, c) => dist2(c.center, eye) - dist2(a.center, eye));
-      for (const bf of [...far1st, buffers.tabs]) {
+      for (const bf of [...far1st, buffers.clips]) {
         if (!bf) continue;
         gl.cullFace(gl.FRONT); draw(bf, CLEAR.albedo, CLEAR.sheen, CLEAR.gloss, CLEAR.alpha);
         gl.cullFace(gl.BACK); draw(bf, CLEAR.albedo, CLEAR.sheen, CLEAR.gloss, CLEAR.alpha);

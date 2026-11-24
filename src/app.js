@@ -17,7 +17,7 @@ import { quarterTurnLength, maxTwistDeg } from './core/twist.js';
 import { toneMap } from './core/target.js';
 import { backdropY, pitchModel } from './core/optics.js';
 import { ribbonSlices, paintOrder } from './core/render.js';
-import { planCombs, calibrationCombs, stackPieces, piecesSVG, piecesDXF, bracketCSV, wallTemplateSVG, mod180, combDepth } from './core/fab.js';
+import { planCombs, calibrationCombs, stackPieces, packPieces, pinClipPieces, backPanelPiece, piecesSVG, piecesDXF, bracketCSV, wallTemplateSVG, mod180 } from './core/fab.js';
 import { shrinkLinear, meanDeltaE, apparentPx, SCREEN_M } from './core/distance.js';
 import { projectJSON, parseProject } from './core/project.js';
 import { problemWith } from './pipeline.js';
@@ -28,7 +28,7 @@ import { createView3D, preset } from './app/view3d.js';
 const $ = (id) => document.getElementById(id);
 const STORE = 'ribbontone.v1';
 
-const LEN = ['widthMm', 'heightMm', 'ribbonW', 'pitch', 'thickness', 'viewXMm', 'rowSpacing', 'minSpacing', 'maxSpan',
+const LEN = ['clipWall', 'widthMm', 'heightMm', 'ribbonW', 'pitch', 'thickness', 'viewXMm', 'rowSpacing', 'minSpacing', 'maxSpan',
   'slotClear', 'minSlot', 'combMargin', 'combEnd', 'holeDia', 'bedMm', 'minWeb', 'combThick', 'standoff'];
 const NUM = ['reflectance', 'sheen', 'gloss', 'strainPct', 'tensionN', 'density', 'G', 'E', 'bgReflectance', 'distM', 'maxRows', 'maxPerRibbon'];
 const RANGE = { gamma: (v) => v.toFixed(2), brightness: (v) => v.toFixed(2), contrast: (v) => v.toFixed(2),
@@ -38,7 +38,7 @@ const SELECT = ['material', 'layout'];
 /** Settings that only change the cutting files: no new solve. */
 // (not slotClear, combMargin or standoff: they set the comb depth and so how far
 // the back wall is behind the ribbons, which the solver's backdrop shadows use)
-const FAB_ONLY = new Set(['minSlot', 'combEnd', 'holeDia', 'bedMm', 'minWeb', 'splitComb', 'combThick']);
+const FAB_ONLY = new Set(['minSlot', 'combEnd', 'holeDia', 'bedMm', 'minWeb', 'splitComb', 'combThick', 'clipWall']);
 /** Settings that only change how the 3D view looks. */
 const VIEW_ONLY = new Set(['box3d', 'combLook', 'combColor', 'shadows3d']);
 /** The default comb colour in the dark-ribbon scheme. */
@@ -263,6 +263,7 @@ function showLayout() {
   $('layoutBlurb').textContent = BLURBS[layout] + (s.hold === 'combs' ? ' Combs hold whole rows, so each ribbon\'s own heights need wall pins.' : '');
   $('curveBody').hidden = !s.curveOn;
   $('standoffRow').hidden = s.hold !== 'pins';
+  $('clipFab').hidden = s.hold !== 'pins';
   $('combFab').hidden = false;
 }
 
@@ -606,7 +607,6 @@ function draw3D() {
     ribbon: { albedo: [s.reflectance, s.reflectance, s.reflectance], sheen: s.sheen, gloss: s.gloss },
     box: { on: v.box3d, albedo: [s.bgReflectance, s.bgReflectance, s.bgReflectance] },
     comb: { look: v.combLook, albedo: hexToLinear(v.combColor) },
-    rodAlbedo: [0.5, 0.5, 0.52],
     background: [0.114, 0.122, 0.149],
     shadows: v.shadows3d,
   });
@@ -625,8 +625,10 @@ function updateNotes() {
     combMsg = 'each ribbon has its own heights: wall pins, no combs';
   }
   if (plan && state.set.hold === 'pins') {
-    const half = combDepth(state.set) / 2;
-    if (state.set.standoff < half) items.push(`the pin stand-off (${lenTxt(state.set.standoff)}) is less than half a tab (${lenTxt(half)}): the tabs would hit the back wall`);
+    // a clip turned end-on to the wall reaches back half its length, its corners a little more
+    const st = state.set, slotW = Math.max(st.minSlot, st.thickness + st.slotClear);
+    const reach = Math.hypot((st.ribbonW + st.slotClear) / 2 + st.clipWall, slotW / 2 + st.clipWall);
+    if (st.standoff < reach + 2) items.push(`the pin stand-off (${lenTxt(st.standoff)}) leaves a clip turned end-on (it reaches back ${lenTxt(reach)}) almost no stem: make it ${lenTxt(reach + 10)} or more`);
   }
   $('combNote').textContent = combMsg;
   $('notes').innerHTML = items.map((t) => `<li>${escapeHtml(t)}</li>`).join('');
@@ -677,6 +679,14 @@ function bindExports() {
     drawView(g, p, state.view === 'distance' ? 'preview' : state.view, k);
     c.toBlob((b) => downloadFile(b, `${base()}-${state.view}.png`, 'image/png'));
   });
+  const pinPlan = () => ({ ...state.plan, s: { ...state.plan.s, ...fabSettings() } });
+  const clipSheet = () => packPieces(pinClipPieces(pinPlan()), state.set.bedMm);
+  const panelSheet = () => stackPieces([backPanelPiece(pinPlan())]);
+  const hasClips = () => state.plan && state.plan.hold === 'pins' && state.plan.ribbons.some((r) => r.knots.length > 2);
+  $('exportClipsSVG').addEventListener('click', () => { if (hasClips()) downloadFile(piecesSVG(clipSheet(), `${base()} pin clips`), `${base()}-pin-clips.svg`, 'image/svg+xml'); });
+  $('exportClipsDXF').addEventListener('click', () => { if (hasClips()) downloadFile(piecesDXF(clipSheet()), `${base()}-pin-clips.dxf`, 'application/dxf'); });
+  $('exportPanelSVG').addEventListener('click', () => { if (hasClips()) downloadFile(piecesSVG(panelSheet(), `${base()} back panel`), `${base()}-back-panel.svg`, 'image/svg+xml'); });
+  $('exportPanelDXF').addEventListener('click', () => { if (hasClips()) downloadFile(piecesDXF(panelSheet()), `${base()}-back-panel.dxf`, 'application/dxf'); });
   const cal = () => stackPieces(calibrationCombs({ ...state.set }, parseFloat($('calStep').value)).pieces);
   $('calSVG').addEventListener('click', () => downloadFile(piecesSVG(cal(), 'RibbonTone calibration combs'), 'ribbontone-calibration-combs.svg', 'image/svg+xml'));
   $('calDXF').addEventListener('click', () => downloadFile(piecesDXF(cal()), 'ribbontone-calibration-combs.dxf', 'application/dxf'));

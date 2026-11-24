@@ -90,8 +90,16 @@ viewer, ribbons' centre lines at z = 0.
   clear acrylic (blended, no depth write, farthest first, back faces then front:
   so prism triangles must wind counter-clockwise from outside, which a test checks).
 - Pins: the top and bottom bars stay combs; every bracket between them is a
-  square one-slot tab on a stand-off rod from the back wall (`standoff` behind
-  the ribbons).
+  pin clip (`fab.clipShapes`): a flat T cut from the comb sheet. The crossbar
+  is the slot plus `clipWall` all round, turned to the ribbon's angle; the stem
+  (80 % of the clip's width) runs straight back to the wall and on through the
+  back panel as a tab. The stem's end is cut parallel to whichever face of the
+  clip it meets, half a clip wall short of the slot, so a straight line always
+  separates stem and slot (a square end clipped the slot's corner on tilted
+  clips). The cut path is the union of the two convex shapes (Weiler–Atherton);
+  the harness checks every whole degree. Cut files: the clips packed across the
+  cutter bed, labelled ribbon.bracket along the stem, and the back panel with a
+  slot for each stem.
 - Box: back, sides, top and bottom, open at the front. Its depth is the combs';
   the combs mount to its sides; with pins the back wall is the stand-off away.
 - Shading is the optics model (Lambert + sheen, same light, same exposure), so
