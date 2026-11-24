@@ -15,7 +15,7 @@ import { DEFAULTS, MATERIALS, materialSettings, toMm, fromMm, pieceGeometry, ton
 import { toEncoded, hexToLinear } from './core/color.js';
 import { quarterTurnLength, maxTwistDeg } from './core/twist.js';
 import { toneMap } from './core/target.js';
-import { backdropY, pitchModel } from './core/optics.js';
+import { backdropY, pitchModel, viewAngle } from './core/optics.js';
 import { ribbonSlices, paintOrder } from './core/render.js';
 import { planCombs, planDepth, sidePanelPiece, calibrationCombs, stackPieces, packPieces, pinClipPieces, backPanelPiece, piecesSVG, piecesDXF, bracketCSV, wallTemplateSVG, mod180 } from './core/fab.js';
 import { shrinkLinear, meanDeltaE, apparentPx, SCREEN_M } from './core/distance.js';
@@ -32,7 +32,8 @@ const LEN = ['clipWall', 'widthMm', 'heightMm', 'ribbonW', 'pitch', 'thickness',
   'slotClear', 'minSlot', 'combMargin', 'combEnd', 'bedMm', 'minWeb', 'combThick', 'standoff'];
 const NUM = ['reflectance', 'sheen', 'gloss', 'strainPct', 'tensionN', 'density', 'G', 'E', 'bgReflectance', 'distM', 'maxRows', 'maxPerRibbon'];
 const RANGE = { gamma: (v) => v.toFixed(2), brightness: (v) => v.toFixed(2), contrast: (v) => v.toFixed(2),
-  lightAz: (v) => `${v}°`, lightEl: (v) => `${v}°`, ambient: (v) => v.toFixed(2), diffusion: (v) => v.toFixed(2) };
+  lightAz: (v) => `${v}°`, lightEl: (v) => `${v}°`, ambient: (v) => v.toFixed(2), diffusion: (v) => v.toFixed(2),
+  align: (v) => (v > 0 ? `+${v.toFixed(2)}` : v.toFixed(2)) };
 const CHECK = ['curveOn', 'splitComb', 'box3d', 'shadows3d'];
 const SELECT = ['material', 'layout'];
 /** Settings that only change the cutting files: no new solve. */
@@ -59,6 +60,8 @@ const state = {
   scene: null,          // core/scene.js, built when the 3D view needs it
   cam: null,            // the 3D view's orbit camera
   idealSlices: null,
+  walk: 0,              // the Preview's viewer, shifted sideways from the design viewpoint, mm
+  walkSlices: new Map(), // core/render.js slices for a shifted viewer, by view
   targetCanvas: null,
   jobId: 0,
   pending: false,
@@ -121,6 +124,7 @@ function onWorkerMessage(ev) {
     state.slices = ribbonSlices(msg.plan, 'th');
     state.exposure = exposureOf(msg.plan, state.slices);
     state.idealSlices = null;
+    state.walkSlices.clear();
     state.scene = null;
     state.targetCanvas = null;
     setStatus(`ready · ${(msg.ms / 1000).toFixed(1)} s`);
@@ -444,6 +448,31 @@ function drawBrackets(ctx, plan, k) {
   }
 }
 
+/**
+ * The plan as a viewer `state.walk` mm to the side sees it: the same ribbons,
+ * each seen from its new direction. The design viewpoint is walk 0.
+ */
+function walked(plan) {
+  if (!state.walk) return plan;
+  const xv = plan.xv + state.walk;
+  return { ...plan, xv, ribbons: plan.ribbons.map((r) => ({ ...r, alpha: viewAngle(r.x, xv, plan.s.distM) })) };
+}
+
+/** The slices for a view (the bracketed or the ideal path), from where the viewer stands. */
+function slicesFor(plan, which) {
+  if (!state.walk) {
+    if (which === 'th') return state.slices;
+    state.idealSlices ||= ribbonSlices(plan, 'ideal');
+    return state.idealSlices;
+  }
+  const key = `${which}@${state.walk}`;
+  if (!state.walkSlices.has(key)) {
+    if (state.walkSlices.size > 8) state.walkSlices.clear();
+    state.walkSlices.set(key, ribbonSlices(walked(plan), which));
+  }
+  return state.walkSlices.get(key);
+}
+
 const HINTS = {
   preview: 'the ribbons from the design viewpoint, the brightest face shown as white',
   ideal: 'with a bracket everywhere: the best the twist limit allows; the gap to Preview is what the brackets cost',
@@ -457,6 +486,7 @@ function paint() {
   if (!plan) return;
   const is3d = state.view === 'view3d';
   $('distControls').hidden = state.view !== 'distance';
+  $('walkCtl').hidden = !['preview', 'ideal', 'distance'].includes(state.view);
   $('ctl3d').hidden = !is3d;
   $('zoomCtl').hidden = is3d;
   $('wrap').hidden = is3d;
@@ -468,12 +498,15 @@ function paint() {
   const ctx = $('view').getContext('2d');
   ctx.setTransform(k, 0, 0, k, 0, 0);
   drawView(ctx, plan, state.view, k);
-  $('hint').textContent = HINTS[state.view] || '';
+  const shifted = state.walk && (state.view === 'preview' || state.view === 'ideal');
+  $('hint').textContent = shifted
+    ? `as a viewer ${lenTxt(Math.abs(state.walk))} ${state.walk > 0 ? 'right' : 'left'} of the design viewpoint sees it (double-click the slider to go back)`
+    : HINTS[state.view] || '';
 }
 
 function drawView(ctx, plan, view, k) {
-  if (view === 'preview') drawRibbons(ctx, plan, state.slices);
-  else if (view === 'ideal') { state.idealSlices ||= ribbonSlices(plan, 'ideal'); drawRibbons(ctx, plan, state.idealSlices); }
+  if (view === 'preview') drawRibbons(ctx, walked(plan), slicesFor(plan, 'th'));
+  else if (view === 'ideal') drawRibbons(ctx, walked(plan), slicesFor(plan, 'ideal'));
   else if (view === 'target') drawTarget(ctx, plan);
   else if (view === 'diff') drawDiff(ctx, plan);
   else if (view === 'brackets') drawBrackets(ctx, plan, k);
@@ -566,6 +599,7 @@ function updateStats() {
   setStat('statBrackets', plan.rows ? `${st.brackets} (${st.rows} rows)` : String(st.brackets));
   setStat('statTone', st.tone.toFixed(1), st.tone > 8 ? 'warn' : '');
   setStat('statSeen', `${st.seen.toFixed(1)} (${st.seenIdeal.toFixed(1)})`, st.seen > 5 ? 'warn' : '');
+  setStat('statOff', `${st.offAxis.stripes.toFixed(1)} / ${st.offAxis.tone.toFixed(1)}`);
   setStat('statRate', `${Math.round(st.rateUse * 100)}%`, st.rateUse > 1 + 1e-6 ? 'bad' : '');
 }
 
@@ -827,6 +861,14 @@ function bindViews() {
   let distTimer = null;
   $('distView').addEventListener('input', () => { $('distViewVal').textContent = `${$('distView').value} m`; clearTimeout(distTimer); distTimer = setTimeout(paint, 80); });
   $('distCompare').addEventListener('change', paint);
+  let walkTimer = null;
+  const showWalk = () => {
+    const v = state.walk;
+    $('walkVal').textContent = v === 0 ? 'design' : `${v > 0 ? '+' : '−'}${lenTxt(Math.abs(v))}`;
+  };
+  $('walkMm').addEventListener('input', () => { state.walk = parseFloat($('walkMm').value) || 0; showWalk(); clearTimeout(walkTimer); walkTimer = setTimeout(paint, 60); });
+  $('walkMm').addEventListener('dblclick', () => { $('walkMm').value = 0; state.walk = 0; showWalk(); paint(); });
+  showWalk();
   $('zoom').addEventListener('change', paint);
   let resizeTimer = null;
   window.addEventListener('resize', () => { clearTimeout(resizeTimer); resizeTimer = setTimeout(paint, 120); });

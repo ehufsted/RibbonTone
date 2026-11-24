@@ -80,16 +80,17 @@ export const DEFAULTS = {
   minSpacing: 40,       // mm, least distance between brackets
   maxSpan: 400,         // mm, longest span between brackets
   diffusion: 0.6,       // share of each ribbon's tone error passed to the next
+  align: 0.5,           // twist alignment, −1 … 1: mirror ribbons to match neighbours (+) or oppose them (−); core/align.js
   // fabrication
   slotClear: 0.6,       // mm added to the slot's length and width
   minSlot: 1.0,         // mm, narrowest slot the laser should cut
-  combMargin: 8,        // mm of comb in front of and behind each row's farthest-reaching slot
-  combEnd: 20,          // mm of comb beyond the outer ribbons' farthest slot ends (core/fab.js combEnds)
+  combMargin: 10,       // mm of comb in front of and behind each row's farthest-reaching slot (1 cm to the back wall)
+  combEnd: 10,          // mm of comb beyond the outer ribbons' farthest slot ends (core/fab.js combEnds): 1 cm to the sides
   bedMm: 600,           // mm, longest comb piece the cutter takes
   splitComb: false,     // cut every comb along its centre line for assembly
   minWeb: 2,            // mm of material between neighbouring slots
   combThick: 3,         // mm, sheet the combs and pin tabs are cut from
-  standoff: 35,         // mm, pins: the least gap from a ribbon's edge to the back wall (fab.pinWallDepth)
+  standoff: 10,         // mm, pins: the least gap from a ribbon's edge to the back wall (fab.pinWallDepth)
   clipWall: 1.5,        // mm, pins: clip material around the slot (core/fab.js clipShapes)
   // the 3D view
   box3d: true,          // the black box around the back, sides, top and bottom

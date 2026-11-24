@@ -21,6 +21,7 @@
 import { DEFAULTS, pieceGeometry, toneLuminance, MAX_RIBBONS, MAX_SAMPLES, lenText } from './core/units.js';
 import { viewAngle, ribbonLUT, lightnessLUT, parseCurve, backdropDistance } from './core/optics.js';
 import { planDepth } from './core/fab.js';
+import { chooseMirrors } from './core/align.js';
 import { sampleColumns, reachRange, toneMap } from './core/target.js';
 import { twistModel, maxTwistDeg, quarterTurnLength } from './core/twist.js';
 import { idealPath, sampleFrame, knotGrid, spanCosts, placeKnots, solveAngles, pathFromKnots, pathLightness, blur1 } from './core/solve.js';
@@ -168,8 +169,24 @@ function solveOnce(rgba, settings, opts = {}) {
   }
   if (forcedRibbons) notes.push(`${forcedRibbons} ribbons need more brackets than allowed to keep every span under ${len(s.maxSpan)}`);
 
+  progress('choosing twist directions');
+  // mirror whole ribbons where it helps the tone, or lines neighbours up (core/align.js)
+  const mirror = chooseMirrors(ribbons.map((r) => r.th), Llut, Lt, s.align);
+  let mirrored = 0;
+  ribbons.forEach((r, i) => {
+    if (!mirror[i]) return;
+    mirrored++;
+    r.knots = r.knots.map((k) => ({ y: k.y, a: -k.a }));
+    r.th = r.th.map((v) => -v);
+    r.ideal = r.ideal.map((v) => -v);
+    r.L = pathLightness(Llut[i], r.th);
+    r.Lideal = pathLightness(Llut[i], r.ideal);
+  });
+
   progress('checking');
   const stats = planStats(ribbons, model, kmaxDeg, n, dy, s.pitch);
+  stats.mirrored = mirrored;
+  stats.offAxis = offAxisDistortion(ribbons, s, xv, curvePts, n, dy, OFF_AXIS_MM);
   stats.ribbons = N;
   stats.rows = rows ? rows.length - 2 : null;
   if (stats.coil > 0.5) notes.push(`low tension: the most twisted span carries ${Math.round(stats.coil * 100)}% of the torque that can make a ribbon coil — raise the bar's tension`);
@@ -180,6 +197,58 @@ function solveOnce(rgba, settings, opts = {}) {
     ribbons, rows, layout, hold: s.hold, range, kmaxDeg, quarterTurn: quarterTurnLength(s),
     curvePts, s, stats, notes,
   };
+}
+
+/** How far to either side the off-axis figure looks from, mm. */
+export const OFF_AXIS_MM = 1000;
+
+/**
+ * What happens for a viewer `walk` mm to either side (at the design distance),
+ * against what the design viewpoint shows. Two measures, lightness × 100, the
+ * mean of the two sides:
+ *
+ *   tone:    the change as the eye blends neighbours (see planStats), a
+ *            uniform shift taken out (a whole picture a little brighter or
+ *            darker is still the picture);
+ *   stripes: how differently NEIGHBOURS change, each ribbon on its own (a
+ *            pitch down it, no blending): the stripe pattern a viewer close
+ *            enough to see single ribbons gets.
+ *
+ * Mirrored neighbours (core/align.js) trade one for the other: one brightens
+ * as the other darkens, which cancels in the blend (steady tone) but is
+ * exactly a stripe pattern up close. Aligned neighbours change together: no
+ * stripes, but the blended tone moves (more in mid-tones than at black or
+ * white, so it is not a uniform shift).
+ */
+export function offAxisDistortion(ribbons, s, xv, curvePts, n, dy, walk) {
+  const here = ribbons.map((r) => r.L);
+  const hereMix = seenMix(here, dy, s.pitch);
+  let tone = 0, stripes = 0;
+  for (const dx of [-walk, walk]) {
+    const there = ribbons.map((r) => pathLightness(lightnessLUT(ribbonLUT(s, viewAngle(r.x, xv + dx, s.distM), curvePts)), r.th));
+    const thereMix = seenMix(there, dy, s.pitch);
+    let mean = 0, cnt = 0;
+    thereMix.forEach((c, i) => c.forEach((v, j) => { mean += v - hereMix[i][j]; cnt++; }));
+    mean /= cnt || 1;
+    let e = 0;
+    thereMix.forEach((c, i) => c.forEach((v, j) => { e += Math.abs(v - hereMix[i][j] - mean); }));
+    tone += (100 * e) / (cnt || 1);
+    const change = there.map((c, i) => blur1(Float64Array.from(c, (v, j) => v - here[i][j]), s.pitch / dy));
+    let d = 0, pairs = 0;
+    for (let i = 1; i < change.length; i++) for (let j = 0; j < n; j++) { d += Math.abs(change[i][j] - change[i - 1][j]); pairs++; }
+    stripes += (100 * d) / (pairs || 1);
+  }
+  return { tone: tone / 2, stripes: stripes / 2 };
+}
+
+/** Columns as the eye mixes them: a pitch down each, then neighbours 1:2:1. */
+function seenMix(cols, dy, pitch) {
+  const blurred = cols.map((c) => blur1(c, pitch / dy));
+  const N = blurred.length;
+  return blurred.map((c, i) => {
+    const a = blurred[Math.max(0, i - 1)], b = blurred[Math.min(N - 1, i + 1)];
+    return c.map((v, j) => (a[j] + 2 * v + b[j]) / 4);
+  });
 }
 
 /** A path's angle at fractional sample index u, clamped at the ends. */
@@ -199,13 +268,7 @@ function pathAt(th, u) {
  */
 export function planStats(ribbons, model, kmaxDeg, n, dy, pitch) {
   const N = ribbons.length;
-  const mix = (key) => {
-    const cols = ribbons.map((r) => blur1(r[key], pitch / dy));
-    return cols.map((c, i) => {
-      const a = cols[Math.max(0, i - 1)], b = cols[Math.min(N - 1, i + 1)];
-      return c.map((v, j) => (a[j] + 2 * v + b[j]) / 4);
-    });
-  };
+  const mix = (key) => seenMix(ribbons.map((r) => r[key]), dy, pitch);
   const tgt = mix('Lt'), got = mix('L'), idl = mix('Lideal');
   let tone = 0, seen = 0, seenIdeal = 0;
   for (let i = 0; i < N; i++) {

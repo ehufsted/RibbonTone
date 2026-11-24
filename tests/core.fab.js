@@ -55,7 +55,7 @@ export function run() {
   check('a face-on row: slot width + 2 margins = 1 + 16 = 17 mm deep', Math.abs(rowDepth([0, 0, 0], s) - 17) < 1e-9, num(rowDepth([0, 0, 0], s), 3));
   check('a row with one ribbon at 90°: slot length + 2 margins = 36.6 mm', Math.abs(rowDepth([0, 90, 10], s) - 36.6) < 1e-9);
   const depths = new Set(combs.pieces.map((p) => Math.round(p.h * 1000)));
-  check('the plan\'s combs come in different depths, each its row\'s', depths.size > 1 && combs.pieces.every((p) => p.h <= combDepth(s) + 1e-9), [...depths].map((d) => num(d / 1000, 1)).join(', '));
+  check('the plan\'s combs come in different depths, each its row\'s', depths.size > 1 && combs.pieces.every((p) => p.h <= combDepth(plan.s) + 1e-9), [...depths].map((d) => num(d / 1000, 1)).join(', '));
   const solo = combRow([0, 30, 60], [0, 0, 0], ['1', '2', '3'], 'R', s).pieces[0];
   check('a whole comb: tabs at both ends, 12 corners; its ends 30 mm past the outer slots\' far ends (10.3 mm out), BOX_WALL more for the tabs',
     solo.cuts[0].pts.length === 12 && Math.abs(solo.w - (60 + 2 * (10.3 + 30) + 2 * BOX_WALL)) < 1e-9,

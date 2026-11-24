@@ -60,7 +60,15 @@ pipeline directly.
      the span's peak rate is within κmax. Twist directions fall out of it.
    Ribbons are solved left to right; each passes a share ("Spread error") of
    its vertically blurred lightness error to the next, which the eye mixes.
-8. **Stats**: tone error (lightness ×100, sample by sample) and "as seen"
+8. **Twist directions** (`core/align.js`): after the solve, each ribbon is
+   kept or mirrored whole (every angle negated: same brackets, same rate),
+   chosen exactly over the row (Viterbi, two states per ribbon) for tone plus
+   `align` × the neighbours' misalignment. Measured on a viewer 1 m to either
+   side (`offAxisDistortion`): aligned neighbours (+) change together, so no
+   stripes but the blended tone moves; opposed ones (−) change oppositely,
+   which cancels in the blend (steady tone) but shows as stripes up close.
+   The Preview's Viewer slider shows any sideways position.
+9. **Stats**: tone error (lightness ×100, sample by sample) and "as seen"
    (after mixing neighbours 1:2:1 and a pitch down the ribbon), with the ideal
    path's for comparison; brackets; the worst span's peak rate and coil ratio.
 

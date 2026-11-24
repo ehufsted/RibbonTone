@@ -32,6 +32,15 @@ or Edge), or open http://localhost:8080/verify.html.
   cut from sheet: a slotted clip at the ribbon's angle on a stem that plugs
   into the box's back panel.
 
+## Twist directions
+
+Every ribbon can be mirrored whole (each twist reversed) without changing its
+brackets or breaking a limit, and from the design viewpoint it looks nearly the
+same. **Twist alignment** chooses: + turns neighbours alike, so a viewer walking
+past sees no stripes (though the blended tone moves); − turns them opposite, so
+the blended tone holds (though stripes show up close); 0 chooses for tone alone.
+The footer's walk-by figures, and the Preview's Viewer slider, show the trade.
+
 ## 3D view
 
 The whole piece in 3D (WebGL): ribbons, the combs as solid or clear prisms (or,

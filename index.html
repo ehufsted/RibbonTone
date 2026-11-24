@@ -271,6 +271,7 @@
         <div class="row" data-for="bunched perRibbon"><label for="maxSpan">Longest span</label><input type="number" id="maxSpan" class="len" min="0" step="any"><span class="unit u"></span></div>
         <div class="row" id="standoffRow" title="pins: the least gap between a ribbon's edge and the back wall (when the ribbon is turned end-on); each clip's stem runs back to the wall"><label for="standoff">Pin stand-off</label><input type="number" id="standoff" class="len" min="0" step="any"><span class="unit u"></span></div>
         <div class="row" title="how much of each ribbon's tone error the next ribbon makes up for (the eye mixes neighbours)"><label for="diffusion">Spread error</label><input type="range" id="diffusion" min="0" max="1" step="0.05"><span class="val" id="diffusionVal"></span></div>
+        <div class="row" title="mirror whole ribbons (every twist reversed): + turns neighbours alike, so a viewer walking past sees no stripes (but the blended tone moves); − turns them opposite, so the blended tone holds (but stripes show up close); 0 chooses for tone alone"><label for="align">Twist alignment</label><input type="range" id="align" min="-1" max="1" step="0.05"><span class="val" id="alignVal"></span></div>
         <ul class="notes" id="notes"></ul>
       </div>
     </details>
@@ -339,6 +340,9 @@
         <select id="combLook" title="how the combs and pin tabs are drawn"><option value="solid">Solid combs</option><option value="clear">Clear combs</option></select>
         <input type="color" id="combColor" title="solid comb colour">
       </span>
+      <span class="distctl" id="walkCtl" title="see the piece as a viewer this far to the side of the design viewpoint does (double-click: back to the design viewpoint)">
+        <label>Viewer <input type="range" id="walkMm" min="-2000" max="2000" step="50" value="0"> <span id="walkVal">design</span></label>
+      </span>
       <span class="distctl" id="distControls" hidden>
         <label>From <input type="range" id="distView" min="0.5" max="30" step="0.5" value="4"> <span id="distViewVal">4 m</span></label>
         <label class="check"><input type="checkbox" id="distCompare" checked> beside the target</label>
@@ -362,6 +366,7 @@
   <span title="brackets between the bars (shared rows × ribbons, or per ribbon)">brackets <b id="statBrackets">—</b></span>
   <span title="mean lightness error ×100 against the target, sample by sample">tone error <b id="statTone">—</b></span>
   <span title="the same after the eye mixes neighbouring ribbons and about a pitch down each; in brackets, what the ideal path (a bracket everywhere) would give">as seen <b id="statSeen">—</b></span>
+  <span title="for a viewer 1 m to either side (lightness × 100): STRIPES, how differently neighbouring ribbons change (seen up close) / TONE, how the blended picture changes, a uniform shift aside (seen from afar). Twist alignment + gives fewer stripes, − a steadier blended tone">walk-by stripes / tone <b id="statOff">—</b></span>
   <span title="the fastest span's peak twist rate as a share of the limit">twist <b id="statRate">—</b></span>
   <span id="status">idle</span>
 </footer>
