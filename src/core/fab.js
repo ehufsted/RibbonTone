@@ -11,9 +11,21 @@
 // both faces are white, the slot's angle is θ mod 180°: the twist between rows
 // (its size and direction) is in the build sheet, not the comb.
 //
+// DEPTH, PER ROW. A comb is as deep as its own row needs: the farthest any of
+// its slots reaches in front of or behind the ribbons' line, plus the margin
+// on each side. Rows of near face-on ribbons are slim. Every comb is centred
+// on the ribbons' line, so only the deepest touches the box's back wall.
+//
+// ENDS. Each comb ends in tabs that plug into slots in the box's side panels
+// (sidePanelPiece), which so also set the row heights.
+//
 // A comb longer than the cutter's bed is cut into pieces at the midpoints
-// between ribbons; "split" cuts every comb along its centre line as well, so
-// the ribbons can be laid into the notches instead of threaded.
+// between ribbons. "Split" cuts every comb in two, front and back, along a
+// zigzag: through each slot along its length, then up to a peak between
+// ribbons. The back half so has a V at every ribbon whose sides lead down into
+// the half-slot, so a ribbon laid in from the front settles in place before
+// the front half closes over it. Peaks stop short of the front edge by the
+// larger of the least web and half the margin.
 //
 // Layers: CUT (red in SVG, colour 1 in DXF) and ENGRAVE (blue, colour 5):
 // ribbon numbers, the row label, and the FRONT mark.
@@ -43,8 +55,108 @@ export function slotRect(cx, cy, th, s) {
   ];
 }
 
-/** The comb's depth (front to back). */
+/** The deepest any comb can be: a slot turned straight front to back, plus the margins. */
 export const combDepth = (s) => s.ribbonW + s.slotClear + 2 * s.combMargin;
+
+/** How far a slot at angle th reaches in front of (or behind) the ribbons' line. */
+export function slotReach(th, s) {
+  const L = s.ribbonW + s.slotClear, Wd = Math.max(s.minSlot, s.thickness + s.slotClear);
+  return (L / 2) * Math.abs(Math.sin(th * RAD)) + (Wd / 2) * Math.abs(Math.cos(th * RAD));
+}
+
+/** A comb row's depth: its farthest-reaching slot, plus the margin front and back. */
+export const rowDepth = (angles, s) => 2 * Math.max(...angles.map((a) => slotReach(a, s))) + 2 * s.combMargin;
+
+/**
+ * The tabs at each end of a comb: [centre (from the back edge), width]. One in
+ * the middle, or one per half of a split comb.
+ */
+export function combTabs(D, s) {
+  const keep = Math.max(2, s.minWeb);
+  return s.splitComb
+    ? [[D / 4, Math.min(10, D / 2 - 2 * keep)], [(3 * D) / 4, Math.min(10, D / 2 - 2 * keep)]]
+    : [[D / 2, Math.min(12, D - 2 * keep)]];
+}
+
+/**
+ * One comb row laid out in its own frame: x from the comb's left end (tabs
+ * excluded), y from the back edge (0) to the front (D), slots on y = D/2.
+ * @returns {{D, x0, total, slots, zig, tabs}}
+ *   x0: the comb's left end on the piece; zig: the split's cut as segments
+ *   {p, q, air} (air: inside a slot, nothing to cut), [] unless split
+ */
+export function combLayout(xs, angles, s) {
+  const D = rowDepth(angles, s);
+  const x0 = xs[0] - s.combEnd, total = xs[xs.length - 1] - xs[0] + 2 * s.combEnd;
+  const cx = xs.map((x) => x - x0);
+  const slots = cx.map((x, i) => slotRect(x, D / 2, angles[i], s));
+  const zig = s.splitComb ? zigzag(cx, angles, D, total, s) : [];
+  return { D, x0, total, slots, zig, tabs: combTabs(D, s) };
+}
+
+/**
+ * The split comb's cut: through each slot along its length, peaks between
+ * ribbons. A leg between a slot's end and a peak must not cut back through the
+ * slot: a steep slot's back end lies below the slot and its peak above, so
+ * there the cut first runs straight on out of the slot's end (a dogleg, at
+ * least the least web long) before it turns toward the peak.
+ */
+function zigzag(cx, angles, D, total, s) {
+  const zc = D / 2, peakY = D - Math.max(s.minWeb, s.combMargin / 2), half = (s.ribbonW + s.slotClear) / 2;
+  const segs = [];
+  const n = cx.length, pitch = n > 1 ? cx[1] - cx[0] : s.pitch;
+  let prev = [0, zc];
+  const go = (q, air = false) => {
+    if (Math.hypot(q[0] - prev[0], q[1] - prev[1]) < 1e-12) return;
+    segs.push({ p: prev, q, air }); prev = q;
+  };
+  const d = (u, v) => Math.hypot(u[0] - v[0], u[1] - v[1]);
+  if (cx[0] - pitch / 2 > 1) go([cx[0] - pitch / 2, peakY]);
+  for (let i = 0; i < n; i++) {
+    const ux = Math.cos(angles[i] * RAD), uy = -Math.sin(angles[i] * RAD);
+    const ea = [cx[i] - half * ux, zc - half * uy], eb = [cx[i] + half * ux, zc + half * uy];
+    const after = i + 1 < n ? [(cx[i] + cx[i + 1]) / 2, peakY] : (cx[i] + pitch / 2 < total - 1 ? [cx[i] + pitch / 2, peakY] : [total, zc]);
+    const [e1, e2] = d(prev, ea) + d(eb, after) <= d(prev, eb) + d(ea, after) ? [ea, eb] : [eb, ea];
+    const slot = slotRect(cx[i], zc, angles[i], s);
+    const v1 = dogleg(e1, [cx[i], zc], prev, slot, D, total, s);
+    const v2 = dogleg(e2, [cx[i], zc], after, slot, D, total, s);
+    go(v1);
+    go(e1);
+    go(e2, true);
+    go(v2);
+    go(after);
+  }
+  if (prev[0] < total) go([total, zc]);
+  return segs;
+}
+
+/**
+ * Where the cut turns after leaving slot end e toward `far`: e itself if the
+ * straight leg clears the slot, or the nearest point straight on from e (at
+ * least the least web out, half-millimetre steps) from which it does.
+ */
+function dogleg(e, centre, far, slot, D, total, s) {
+  let ox = e[0] - centre[0], oy = e[1] - centre[1];
+  const l = Math.hypot(ox, oy) || 1;
+  ox /= l; oy /= l;
+  const keep = s.minWeb;
+  const inComb = (v) => v[1] >= keep && v[1] <= D - keep && v[0] >= 0 && v[0] <= total;
+  const clears = (v, dd) => {
+    const L = Math.hypot(far[0] - v[0], far[1] - v[1]) || 1, t = 1e-3 / L;
+    const start = [v[0] + (far[0] - v[0]) * t, v[1] + (far[1] - v[1]) * t];
+    const dist = polyDistance([start, far], slot);
+    return dd === 0 ? dist > 0 : dist >= Math.min(dd, keep) - 1e-9;
+  };
+  if (clears(e, 0)) return e;
+  let best = e;
+  for (let dd = keep; dd < D; dd += 0.5) {
+    const v = [e[0] + ox * dd, e[1] + oy * dd];
+    if (!inComb(v)) break;
+    best = v;
+    if (clears(v, dd)) return v;
+  }
+  return best;
+}
 
 /**
  * One comb row as pieces.
@@ -52,37 +164,79 @@ export const combDepth = (s) => s.ribbonW + s.slotClear + 2 * s.combMargin;
  * @param {number[]} angles  degrees, one per ribbon
  * @param {string[]} labels  engraved beside each slot
  * @param {string} title  engraved at the left end
- * @returns {{pieces: {w, h, cuts, engrave, name}[], web: number}}  web: the
- *   least material between two slots in this row, mm
+ * @returns {{pieces: {w, h, cuts, engrave, name}[], web: number, D: number}}  web:
+ *   the least material between two slots, or between the split's cut and a
+ *   slot it does not pass through, in this row, mm
  */
 export function combRow(xs, angles, labels, title, s) {
-  const D = combDepth(s);
-  const x0 = xs[0] - s.combEnd, total = xs[xs.length - 1] - xs[0] + 2 * s.combEnd;
-  const slots = xs.map((x, i) => slotRect(x - x0, D / 2, angles[i], s));
+  const { D, x0, total, slots, zig, tabs } = combLayout(xs, angles, s);
   let web = Infinity;
   for (let i = 0; i + 1 < slots.length; i++) web = Math.min(web, polyDistance(slots[i], slots[i + 1]));
+  for (const g of zig) {
+    if (g.air) continue;
+    slots.forEach((P) => {
+      // the slots the segment starts or ends at are touched on purpose
+      if (onSlotEnd(g.p, P) || onSlotEnd(g.q, P)) return;
+      web = Math.min(web, polyDistance([g.p, g.q], P));
+    });
+  }
+  const T = BOX_WALL;
   const cutsAt = splitPoints(xs.slice(1).map((x, i) => (xs[i] + x) / 2 - x0), total, s.bedMm);
   const pieces = [];
   for (let p = 0; p + 1 < cutsAt.length; p++) {
     const a = cutsAt[p], b = cutsAt[p + 1], w = b - a;
-    const cuts = [{ kind: 'poly', pts: [[0, 0], [w, 0], [w, D], [0, D]] }];
+    const left = p === 0, right = p === cutsAt.length - 2;
+    const off = left ? T : 0;                     // the left tabs reach to x = 0
+    const X = (x) => x - a + off;
+    const cuts = [{ kind: 'poly', pts: tabbedOutline(w, D, left ? tabs : [], right ? tabs : [], T).map(([x, y]) => [x + off, y]) }];
     const engrave = [];
     xs.forEach((x, i) => {
-      const cx = x - x0;
-      if (cx < a || cx >= b) return;
-      cuts.push({ kind: 'poly', pts: slots[i].map(([px, py]) => [px - a, py]) });
-      engrave.push({ x: cx - a, y: D - 1.5, h: Math.min(3, s.combMargin * 0.45), text: labels[i], anchor: 'middle' });
+      const cxi = x - x0;
+      if (cxi < a || cxi >= b) return;
+      cuts.push({ kind: 'poly', pts: slots[i].map(([px, py]) => [X(px), py]) });
+      engrave.push({ x: X(cxi), y: D - 1.5, h: Math.min(3, s.combMargin * 0.45), text: labels[i], anchor: 'middle' });
     });
-    if (p === 0) cuts.push({ kind: 'circle', cx: s.combEnd / 2, cy: D / 2, r: s.holeDia / 2 });
-    if (p === cutsAt.length - 2) cuts.push({ kind: 'circle', cx: w - s.combEnd / 2, cy: D / 2, r: s.holeDia / 2 });
-    if (s.splitComb) cuts.push({ kind: 'line', x1: 0, y1: D / 2, x2: w, y2: D / 2 });
+    for (const run of clipRuns(zig, a, b)) cuts.push({ kind: 'path', pts: run.map(([px, py]) => [X(px), py]) });
     const name = cutsAt.length > 2 ? `${title} ${String.fromCharCode(97 + p)}` : title;
-    engrave.push({ x: 2, y: Math.min(3.5, s.combMargin * 0.6), h: Math.min(3, s.combMargin * 0.45), text: name, anchor: 'start' });
-    // at the left end, under the title: the slots' labels run along the front edge
-    engrave.push({ x: 2, y: D - 1.5, h: Math.min(3, s.combMargin * 0.45), text: 'FRONT', anchor: 'start' });
-    pieces.push({ w, h: D, cuts, engrave, name });
+    engrave.push({ x: off + 2, y: Math.min(3.5, s.combMargin * 0.6), h: Math.min(3, s.combMargin * 0.45), text: name, anchor: 'start' });
+    // at the comb's left end, under the title (later pieces start beside a ribbon's label)
+    if (left) engrave.push({ x: off + 2, y: D - 1.5, h: Math.min(3, s.combMargin * 0.45), text: 'FRONT', anchor: 'start' });
+    pieces.push({ w: w + off + (right ? T : 0), h: D, cuts, engrave, name });
   }
-  return { pieces, web };
+  return { pieces, web, D };
+}
+
+/** Is point q one of slot P's two end midpoints (where the split's cut enters it)? */
+function onSlotEnd(q, P) {
+  const m1 = [(P[0][0] + P[3][0]) / 2, (P[0][1] + P[3][1]) / 2], m2 = [(P[1][0] + P[2][0]) / 2, (P[1][1] + P[2][1]) / 2];
+  return Math.hypot(q[0] - m1[0], q[1] - m1[1]) < 1e-6 || Math.hypot(q[0] - m2[0], q[1] - m2[1]) < 1e-6;
+}
+
+/** A w × D rectangle with tabs ([centre, width] from the back edge) T long on its left and right ends. */
+function tabbedOutline(w, D, leftTabs, rightTabs, T) {
+  const pts = [[0, 0], [w, 0]];
+  for (const [c, tw] of [...rightTabs].sort((u, v) => u[0] - v[0])) pts.push([w, c - tw / 2], [w + T, c - tw / 2], [w + T, c + tw / 2], [w, c + tw / 2]);
+  pts.push([w, D], [0, D]);
+  for (const [c, tw] of [...leftTabs].sort((u, v) => v[0] - u[0])) pts.push([0, c + tw / 2], [-T, c + tw / 2], [-T, c - tw / 2], [0, c - tw / 2]);
+  return pts;
+}
+
+/** The split's cut, inside [a, b] in x, as open runs of points (segments in a slot dropped). */
+function clipRuns(segs, a, b) {
+  const runs = [];
+  let cur = null;
+  const lerp = (p, q, x) => [x, p[1] + ((q[1] - p[1]) * (x - p[0])) / (q[0] - p[0] || 1)];
+  for (const g of segs) {
+    if (g.air) { cur = null; continue; }
+    let { p, q } = g;
+    const lo = Math.min(p[0], q[0]), hi = Math.max(p[0], q[0]);
+    if (hi < a || lo > b) { cur = null; continue; }
+    if (p[0] < a) p = lerp(p, q, a); else if (p[0] > b) p = lerp(p, q, b);
+    if (q[0] < a) q = lerp(g.p, g.q, a); else if (q[0] > b) q = lerp(g.p, g.q, b);
+    if (!cur || Math.hypot(cur[cur.length - 1][0] - p[0], cur[cur.length - 1][1] - p[1]) > 1e-9) { cur = [p]; runs.push(cur); }
+    cur.push(q);
+  }
+  return runs.filter((r) => r.length > 1);
 }
 
 /**
@@ -114,21 +268,64 @@ export function splitPoints(mids, total, bed) {
   return out;
 }
 
-/** Every comb of a plan: one row per shared bracket height, bars included. */
+/**
+ * A plan's comb rows, top to bottom: every shared row, or with pins (or
+ * per-ribbon heights) just the two bars. {y, angles, title}
+ */
+export function combRowsOf(plan) {
+  const top = (r) => r.knots[0], bottom = (r) => r.knots[r.knots.length - 1];
+  const picks = plan.hold === 'pins' || !plan.rows ? [top, bottom] : plan.rows.map((_, k) => (r) => r.knots[k]);
+  return picks.map((pick, k) => {
+    const y = pick(plan.ribbons[0]).y;
+    const title = k === 0 ? 'TOP BAR' : k === picks.length - 1 ? 'BOTTOM BAR' : `ROW ${k} @ ${Math.round(y)}`;
+    return { y, angles: plan.ribbons.map((r) => pick(r).a), title };
+  });
+}
+
+/** The deepest comb of a plan: the box's depth. */
+export const planDepth = (plan, s = plan.s) => Math.max(...combRowsOf(plan).map((r) => rowDepth(r.angles, s)));
+
+/** Every comb of a plan, bars included. */
 export function planCombs(plan) {
   const s = plan.s, xs = plan.ribbons.map((r) => r.x);
   const labels = plan.ribbons.map((r, i) => String(i + 1));
-  const rows = plan.rows || [];
   let web = Infinity;
   const all = [];
-  rows.forEach((y, k) => {
-    const angles = plan.ribbons.map((r) => r.knots[k].a);
-    const title = k === 0 ? 'TOP BAR' : k === rows.length - 1 ? 'BOTTOM BAR' : `ROW ${k} @ ${Math.round(y)}`;
-    const row = combRow(xs, angles, labels, title, s);
-    web = Math.min(web, row.web);
-    all.push(...row.pieces);
-  });
+  for (const row of combRowsOf(plan)) {
+    const c = combRow(xs, row.angles, labels, row.title, s);
+    web = Math.min(web, c.web);
+    all.push(...c.pieces);
+  }
   return { pieces: all, web };
+}
+
+/**
+ * A side panel of the box (cut two): one slot per comb tab at every row
+ * height, seen from inside with the back edge at the left. Its depth runs from
+ * the back wall to the front of the deepest comb; its height takes in the top
+ * and bottom panels.
+ */
+export function sidePanelPiece(plan) {
+  const s = plan.s, H = plan.piece.H, T = BOX_WALL, t = s.combThick;
+  const Dmax = planDepth(plan);
+  const zFront = Dmax / 2, zBack = s.hold === 'pins' ? -Math.max(s.standoff, Dmax / 2) : -Dmax / 2;
+  const yTop = H + t / 2 + T, yBot = -t / 2 - T;
+  const w = zFront - zBack, h = yTop - yBot;
+  const cuts = [{ kind: 'poly', pts: [[0, 0], [w, 0], [w, h], [0, h]] }], engrave = [];
+  const rows = combRowsOf(plan);
+  for (const row of rows) {
+    const D = rowDepth(row.angles, s), cy = yTop - (H - row.y);
+    for (const [c, tw] of combTabs(D, s)) {
+      const cz = c - D / 2 - zBack, sw = tw + s.slotClear, sh = t + s.slotClear;
+      cuts.push({ kind: 'poly', pts: [[cz - sw / 2, cy - sh / 2], [cz + sw / 2, cy - sh / 2], [cz + sw / 2, cy + sh / 2], [cz - sw / 2, cy + sh / 2]] });
+    }
+    engrave.push({ x: w - 1.5, y: cy - t / 2 - 1.2, h: 2, text: row.title, anchor: 'end' });
+  }
+  // between the first two rows, clear of the tab slots; rotated text's letters lie to the baseline's left
+  const between = rows.length > 1 ? yTop - (H - (rows[0].y + rows[1].y) / 2) : h / 2;
+  engrave.push({ x: 4.5, y: between, h: 3, text: 'BACK', anchor: 'middle', rot: 90 });
+  engrave.push({ x: w / 2 + 1.5, y: between, h: 3, text: 'SIDE PANEL - CUT 2', anchor: 'middle', rot: 90 });
+  return { w, h, cuts, engrave, name: 'SIDE PANEL' };
 }
 
 /** The calibration comb: one slot per test angle, at the design pitch. Cut two. */
@@ -328,7 +525,7 @@ export function piecesSVG(sheet, title = 'RibbonTone') {
   for (const { p, x, y } of placed) {
     for (const t of p.engrave) {
       const rot = t.rot ? ` transform="rotate(${f2(-t.rot)} ${f2(x + t.x)} ${f2(y + t.y)})"` : '';
-      out += `<text x="${f2(x + t.x)}" y="${f2(y + t.y)}" font-size="${f2(t.h)}" text-anchor="${t.anchor === 'middle' ? 'middle' : 'start'}"${rot}>${esc(t.text)}</text>\n`;
+      out += `<text x="${f2(x + t.x)}" y="${f2(y + t.y)}" font-size="${f2(t.h)}" text-anchor="${t.anchor === 'middle' || t.anchor === 'end' ? t.anchor : 'start'}"${rot}>${esc(t.text)}</text>\n`;
     }
   }
   return out + '</g>\n</svg>\n';
@@ -337,7 +534,7 @@ export function piecesSVG(sheet, title = 'RibbonTone') {
 function shapeSVG(c, x, y) {
   if (c.kind === 'circle') return `<circle cx="${f2(x + c.cx)}" cy="${f2(y + c.cy)}" r="${f2(c.r)}"/>\n`;
   if (c.kind === 'line') return `<line x1="${f2(x + c.x1)}" y1="${f2(y + c.y1)}" x2="${f2(x + c.x2)}" y2="${f2(y + c.y2)}"/>\n`;
-  return `<path d="M${c.pts.map(([px, py]) => `${f2(x + px)} ${f2(y + py)}`).join(' L')} Z"/>\n`;
+  return `<path d="M${c.pts.map(([px, py]) => `${f2(x + px)} ${f2(y + py)}`).join(' L')}${c.kind === 'path' ? '' : ' Z'}"/>\n`;
 }
 
 const pair = (code, value) => `${code}\n${value}\n`;
@@ -366,16 +563,16 @@ export function piecesDXF(sheet) {
         s += pair(0, 'LINE') + pair(8, 'CUT') + pair(10, X(x + c.x1)) + pair(20, Y(y + c.y1)) + pair(30, 0) +
           pair(11, X(x + c.x2)) + pair(21, Y(y + c.y2)) + pair(31, 0);
       } else {
-        s += pair(0, 'POLYLINE') + pair(8, 'CUT') + pair(66, 1) + pair(70, 1) + pair(10, 0) + pair(20, 0) + pair(30, 0);
+        s += pair(0, 'POLYLINE') + pair(8, 'CUT') + pair(66, 1) + pair(70, c.kind === 'path' ? 0 : 1) + pair(10, 0) + pair(20, 0) + pair(30, 0);
         for (const [px, py] of c.pts) s += pair(0, 'VERTEX') + pair(8, 'CUT') + pair(10, X(x + px)) + pair(20, Y(y + py)) + pair(30, 0);
         s += pair(0, 'SEQEND') + pair(8, 'CUT');
       }
     }
     for (const t of p.engrave) {
-      const mid = t.anchor === 'middle';
+      const mid = t.anchor === 'middle' || t.anchor === 'end';
       s += pair(0, 'TEXT') + pair(8, 'ENGRAVE') + pair(10, X(x + t.x)) + pair(20, Y(y + t.y)) + pair(30, 0) +
         pair(40, f2(t.h)) + pair(1, t.text) + (t.rot ? pair(50, f2(t.rot)) : '') +
-        (mid ? pair(72, 1) + pair(11, X(x + t.x)) + pair(21, Y(y + t.y)) + pair(31, 0) : '');
+        (mid ? pair(72, t.anchor === 'end' ? 2 : 1) + pair(11, X(x + t.x)) + pair(21, Y(y + t.y)) + pair(31, 0) : '');
     }
   }
   return s + pair(0, 'ENDSEC') + pair(0, 'EOF');

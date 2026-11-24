@@ -9,8 +9,10 @@
 // same cross-section core/render.js projects, with face normal (sin θ, 0, cos θ).
 //
 // THE PARTS AS BUILT:
-// - Combs are solid prisms, the comb's own length (core/fab.js) by its depth
-//   (front to back, centred on the ribbons) by the sheet's thickness. Ribbons
+// - Combs are solid prisms, the comb's own length (core/fab.js) by its row's
+//   depth (front to back, centred on the ribbons) by the sheet's thickness,
+//   with tabs at the ends into the side panels. A split comb's zigzag is drawn
+//   on both faces. Ribbons
 //   simply pass through them: with a depth buffer the part inside a solid comb
 //   is hidden, which looks exactly like a ribbon through a slot. Slot outlines
 //   are drawn on both faces so the angles read.
@@ -19,11 +21,11 @@
 //   a narrow slotted crossbar turned to the ribbon's angle on a stem from the
 //   back wall (its tab buried in the back panel). Two prisms each.
 // - The box is open at the front: back, sides, top and bottom panels outside
-//   the combs' ends (the combs mount to the sides) and the bars. Its depth is
-//   the combs' depth; with pins the back wall sits `standoff` behind the
-//   ribbons instead.
+//   the combs' ends (the combs' tabs plug into the sides) and the bars. Its
+//   depth is the deepest comb's; with pins the back wall sits `standoff`
+//   behind the ribbons instead.
 
-import { combDepth, slotRect, clipShapes, BOX_WALL } from './fab.js';
+import { slotRect, clipShapes, combLayout, combRowsOf, planDepth, BOX_WALL } from './fab.js';
 
 export { BOX_WALL };
 
@@ -116,7 +118,7 @@ export function buildScene(plan, s) {
   const H = plan.piece.H, hw = s.ribbonW / 2;
   const Y = (y) => H - y;
   const xs = plan.ribbons.map((r) => r.x);
-  const D = combDepth(s), t = s.combThick;
+  const D = planDepth(plan, s), t = s.combThick;
   const pins = s.hold === 'pins';
   const zFront = D / 2;
   const zBack = pins ? -Math.max(s.standoff, D / 2) : -D / 2;
@@ -150,15 +152,23 @@ export function buildScene(plan, s) {
       }
     }
   };
-  // each row picks one knot per ribbon (with per-ribbon heights only the bars line up)
-  const top = (r) => r.knots[0], bottom = (r) => r.knots[r.knots.length - 1];
-  const rows = pins || !plan.rows ? [top, bottom] : plan.rows.map((_, k) => (r) => r.knots[k]);
-  const combs = rows.map((pick, i) => {
-    const yw = Y(pick(plan.ribbons[0]).y);
+  // every comb row (with pins, the two bars): its own depth, tabs into the side panels
+  const T = BOX_WALL;
+  const combs = combRowsOf(plan).map((row, i) => {
+    const yw = Y(row.y), lay = combLayout(xs, row.angles, s), Dr = lay.D;
     const m = mesh();
-    addBox(m, bx0, bx1, yw - t / 2, yw + t / 2, -D / 2, D / 2);
-    plan.ribbons.forEach((r) => slotLines(r.x, yw, pick(r).a));
-    return { ...pack(m), center: [(bx0 + bx1) / 2, yw, 0], row: i };
+    addBox(m, bx0, bx1, yw - t / 2, yw + t / 2, -Dr / 2, Dr / 2);
+    for (const [c, tw] of lay.tabs) {
+      const z = c - Dr / 2;
+      addBox(m, bx0 - T, bx0, yw - t / 2, yw + t / 2, z - tw / 2, z + tw / 2);
+      addBox(m, bx1, bx1 + T, yw - t / 2, yw + t / 2, z - tw / 2, z + tw / 2);
+    }
+    xs.forEach((x, k) => slotLines(x, yw, row.angles[k]));
+    for (const g of lay.zig) {
+      if (g.air) continue;
+      for (const yy of [yw + t / 2 + 0.05, yw - t / 2 - 0.05]) lines.push(bx0 + g.p[0], yy, g.p[1] - Dr / 2, bx0 + g.q[0], yy, g.q[1] - Dr / 2);
+    }
+    return { ...pack(m), center: [(bx0 + bx1) / 2, yw, 0], row: i, depth: Dr };
   });
 
   // a pin clip for every bracket between the bars: crossbar and stem
@@ -177,7 +187,6 @@ export function buildScene(plan, s) {
 
   // the box: back, sides, top and bottom, open at the front
   const box = mesh();
-  const T = BOX_WALL;
   const yTop = H + t / 2, yBot = -t / 2;
   addBox(box, bx0 - T, bx1 + T, yBot - T, yTop + T, zBack - T, zBack);
   addBox(box, bx0 - T, bx0, yBot - T, yTop + T, zBack, zFront);

@@ -86,8 +86,16 @@ export function pitchModel(th, al, s, ybg = backdropY(s)) {
   return { c, F, Famb, Fdir, Y: c * F + (1 - c) * yb, backLit: lf };
 }
 
-/** How far behind the ribbons' centre lines the backdrop is: the box's back wall. */
-export const backdropDistance = (s) => (s.hold === 'pins' ? Math.max(s.standoff, combDepth(s) / 2) : combDepth(s) / 2);
+/**
+ * How far behind the ribbons' centre lines the backdrop is: the box's back
+ * wall, against the deepest comb (or the pin stand-off). The deepest comb
+ * depends on the solved angles, so the pipeline solves once with the deepest
+ * a comb can be, then again with `backDepth`, the deepest that came out.
+ */
+export const backdropDistance = (s) => {
+  const D = s.backDepth > 0 ? s.backDepth : combDepth(s);
+  return s.hold === 'pins' ? Math.max(s.standoff, D / 2) : D / 2;
+};
 
 /**
  * THE RIBBONS' SHADOWS ON THE BACKDROP. Locally every ribbon of a stretch has

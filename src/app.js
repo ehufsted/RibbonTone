@@ -17,7 +17,7 @@ import { quarterTurnLength, maxTwistDeg } from './core/twist.js';
 import { toneMap } from './core/target.js';
 import { backdropY, pitchModel } from './core/optics.js';
 import { ribbonSlices, paintOrder } from './core/render.js';
-import { planCombs, calibrationCombs, stackPieces, packPieces, pinClipPieces, backPanelPiece, piecesSVG, piecesDXF, bracketCSV, wallTemplateSVG, mod180 } from './core/fab.js';
+import { planCombs, planDepth, sidePanelPiece, calibrationCombs, stackPieces, packPieces, pinClipPieces, backPanelPiece, piecesSVG, piecesDXF, bracketCSV, wallTemplateSVG, mod180 } from './core/fab.js';
 import { shrinkLinear, meanDeltaE, apparentPx, SCREEN_M } from './core/distance.js';
 import { projectJSON, parseProject } from './core/project.js';
 import { problemWith } from './pipeline.js';
@@ -29,7 +29,7 @@ const $ = (id) => document.getElementById(id);
 const STORE = 'ribbontone.v1';
 
 const LEN = ['clipWall', 'widthMm', 'heightMm', 'ribbonW', 'pitch', 'thickness', 'viewXMm', 'rowSpacing', 'minSpacing', 'maxSpan',
-  'slotClear', 'minSlot', 'combMargin', 'combEnd', 'holeDia', 'bedMm', 'minWeb', 'combThick', 'standoff'];
+  'slotClear', 'minSlot', 'combMargin', 'combEnd', 'bedMm', 'minWeb', 'combThick', 'standoff'];
 const NUM = ['reflectance', 'sheen', 'gloss', 'strainPct', 'tensionN', 'density', 'G', 'E', 'bgReflectance', 'distM', 'maxRows', 'maxPerRibbon'];
 const RANGE = { gamma: (v) => v.toFixed(2), brightness: (v) => v.toFixed(2), contrast: (v) => v.toFixed(2),
   lightAz: (v) => `${v}°`, lightEl: (v) => `${v}°`, ambient: (v) => v.toFixed(2), diffusion: (v) => v.toFixed(2) };
@@ -38,7 +38,7 @@ const SELECT = ['material', 'layout'];
 /** Settings that only change the cutting files: no new solve. */
 // (not slotClear, combMargin or standoff: they set the comb depth and so how far
 // the back wall is behind the ribbons, which the solver's backdrop shadows use)
-const FAB_ONLY = new Set(['minSlot', 'combEnd', 'holeDia', 'bedMm', 'minWeb', 'splitComb', 'combThick', 'clipWall']);
+const FAB_ONLY = new Set(['minSlot', 'combEnd', 'bedMm', 'minWeb', 'splitComb', 'combThick', 'clipWall']);
 /** Settings that only change how the 3D view looks. */
 const VIEW_ONLY = new Set(['box3d', 'combLook', 'combColor', 'shadows3d']);
 /** The default comb colour in the dark-ribbon scheme. */
@@ -617,12 +617,14 @@ function updateNotes() {
   const plan = state.plan;
   const items = plan ? plan.notes.slice() : [];
   let combMsg = '';
-  if (plan && plan.rows) {
-    const c = planCombs({ ...plan, s: { ...plan.s, ...fabSettings() } });
-    combMsg = `${c.pieces.length} comb pieces · least web between slots ${lenTxt(c.web)}`;
-    if (c.web < state.set.minWeb) items.push(`neighbouring comb slots come ${lenTxt(c.web)} apart, under the least web (${lenTxt(state.set.minWeb)}): widen the pitch`);
-  } else if (plan) {
-    combMsg = 'each ribbon has its own heights: wall pins, no combs';
+  if (plan) {
+    const fp = { ...plan, s: { ...plan.s, ...fabSettings() } };
+    const c = planCombs(fp);
+    combMsg = `${c.pieces.length} comb pieces${plan.rows && plan.hold !== 'pins' ? '' : ' (the top and bottom bars)'} · ` +
+      `deepest ${lenTxt(planDepth(fp))} · least web ${lenTxt(c.web)}`;
+    if (c.web < state.set.minWeb) {
+      items.push(`comb material comes down to ${lenTxt(c.web)} (between slots${state.set.splitComb ? ', or the split\'s cut and a slot' : ''}), under the least web (${lenTxt(state.set.minWeb)}): widen the pitch`);
+    }
   }
   if (plan && state.set.hold === 'pins') {
     // a clip turned end-on to the wall reaches back half its length, its corners a little more
@@ -632,7 +634,7 @@ function updateNotes() {
   }
   $('combNote').textContent = combMsg;
   $('notes').innerHTML = items.map((t) => `<li>${escapeHtml(t)}</li>`).join('');
-  $('exportCombsSVG').disabled = $('exportCombsDXF').disabled = !(plan && plan.rows);
+  $('exportCombsSVG').disabled = $('exportCombsDXF').disabled = !plan;
 }
 
 const fabSettings = () => Object.fromEntries([...FAB_ONLY].map((k) => [k, state.set[k]]));
@@ -654,8 +656,11 @@ function bindExports() {
     const plan = state.plan;
     return stackPieces(planCombs({ ...plan, s: { ...plan.s, ...fabSettings() } }).pieces);
   };
-  $('exportCombsSVG').addEventListener('click', () => { if (state.plan?.rows) downloadFile(piecesSVG(combSheet(), `${base()} combs`), `${base()}-combs.svg`, 'image/svg+xml'); });
-  $('exportCombsDXF').addEventListener('click', () => { if (state.plan?.rows) downloadFile(piecesDXF(combSheet()), `${base()}-combs.dxf`, 'application/dxf'); });
+  $('exportCombsSVG').addEventListener('click', () => { if (state.plan) downloadFile(piecesSVG(combSheet(), `${base()} combs`), `${base()}-combs.svg`, 'image/svg+xml'); });
+  $('exportCombsDXF').addEventListener('click', () => { if (state.plan) downloadFile(piecesDXF(combSheet()), `${base()}-combs.dxf`, 'application/dxf'); });
+  const sideSheet = () => stackPieces([sidePanelPiece({ ...state.plan, s: { ...state.plan.s, ...fabSettings() } })]);
+  $('exportSideSVG').addEventListener('click', () => { if (state.plan) downloadFile(piecesSVG(sideSheet(), `${base()} side panel`), `${base()}-side-panel.svg`, 'image/svg+xml'); });
+  $('exportSideDXF').addEventListener('click', () => { if (state.plan) downloadFile(piecesDXF(sideSheet()), `${base()}-side-panel.dxf`, 'application/dxf'); });
   $('exportCSV').addEventListener('click', () => { if (state.plan) downloadFile(bracketCSV(state.plan, state.set.units), `${base()}-brackets.csv`, 'text/csv'); });
   $('exportTemplate').addEventListener('click', () => { if (state.plan) downloadFile(wallTemplateSVG(state.plan), `${base()}-wall-template.svg`, 'image/svg+xml'); });
   $('exportJson').addEventListener('click', () => {

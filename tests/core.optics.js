@@ -49,7 +49,7 @@ export function run() {
 
   section('core.optics: shadows on the backdrop', 'Each ribbon\'s shadow on the backdrop (the box\'s back wall, half a comb depth ' +
     'behind) is its cross-section dropped along the light. Lit from where the viewer stands, every shadow hides behind its own ribbon; ' +
-    'from the side, shadows show in the gaps. Edge-on, a ribbon\'s shadow is a sliver.');
+    'from the side, shadows show in the gaps. A ribbon lying along the light casts only a sliver; one edge-on to the viewer can be broadside to a side light.');
   const L = (az, el = 0) => [Math.cos(el * Math.PI / 180) * Math.sin(az * Math.PI / 180), Math.cos(el * Math.PI / 180) * Math.cos(az * Math.PI / 180)];
   const ws = { ...plain, slotClear: 0.6, combMargin: 8 };
   check('combs: the backdrop is half a comb depth behind (18.3 mm)', Math.abs(backdropDistance(ws) - 18.3) < 1e-9 && backdropDistance({ ...ws, hold: 'pins', standoff: 45 }) === 45);

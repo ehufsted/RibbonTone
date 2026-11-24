@@ -1,5 +1,6 @@
 import { section, check, num, plain, flatRGBA, vRamp, makeRGBA } from './runner.js';
 import { runPipeline } from '../src/pipeline.js';
+import { planDepth, combDepth } from '../src/core/fab.js';
 
 const mod180 = (a) => ((a % 180) + 180) % 180;
 /** How far from face-on an angle is, 0…90. */
@@ -16,6 +17,8 @@ export function run() {
   check('ramp: near edge-on at the top, face-on at the bottom', offFace(r0.th[2]) > 70 && offFace(r0.th[ramp.n - 3]) < 20,
     `${num(offFace(r0.th[2]), 1)}° → ${num(offFace(r0.th[ramp.n - 3]), 1)}°`);
   check('ramp: no span over the rate limit', ramp.stats.rateUse <= 1 + 1e-9, `${num(ramp.stats.rateUse * 100, 1)}% of the limit`);
+  check('the box\'s depth used for the backdrop is the deepest comb that came out', Math.abs(ramp.s.backDepth - planDepth(ramp)) < 1e-9 && ramp.s.backDepth <= combDepth(ramp.s) + 1e-9,
+    `${num(ramp.s.backDepth, 2)} mm`);
   const evenGaps = ramp.rows.slice(1).map((y, k) => y - ramp.rows[k]);
   check('even rows: every gap the same (600 mm / 6)', evenGaps.every((g) => Math.abs(g - 100) < 1e-9), evenGaps.map((g) => num(g, 1)).join(' '));
 

@@ -72,7 +72,16 @@ pipeline directly.
   farthest from the viewer first; the brightest face is white.
 - Fabrication (`core/fab.js`): comb rows (slots along (cos θ, −sin θ) seen from
   above, FRONT at the viewer's edge, split at midpoints between ribbons to fit
-  the cutter bed, optional centre split), the bracket list CSV (slot angle and
+  the cutter bed). Each comb is as deep as its own row needs (`rowDepth`: the
+  farthest-reaching slot plus the margin front and back), centred on the
+  ribbons' line; the box is as deep as the deepest, so the pipeline solves
+  once with the deepest possible comb and again with the deepest that came out
+  (the backdrop shadows depend on it). Comb ends carry tabs into slots in the
+  side panels (`sidePanelPiece`, cut two). The optional split is a zigzag
+  (`combLayout`): along each slot, peaks between ribbons (the back half gets a
+  V at each ribbon); where a straight leg would cut back through a steep slot
+  it first runs straight out of the slot's end (a dogleg, at least the least
+  web long). With pins, the top and bottom bars are combs too. the bracket list CSV (slot angle and
   signed turn since the bracket above), a 1:1 wall template, the calibration
   combs. SVG and DXF (R12, y flipped) from the same shapes.
 

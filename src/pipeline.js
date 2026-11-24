@@ -19,7 +19,8 @@
 //     layout, hold, range, kmaxDeg, quarterTurn, curvePts, s, stats, notes }
 
 import { DEFAULTS, pieceGeometry, toneLuminance, MAX_RIBBONS, MAX_SAMPLES, lenText } from './core/units.js';
-import { viewAngle, ribbonLUT, lightnessLUT, parseCurve } from './core/optics.js';
+import { viewAngle, ribbonLUT, lightnessLUT, parseCurve, backdropDistance } from './core/optics.js';
+import { planDepth } from './core/fab.js';
 import { sampleColumns, reachRange, toneMap } from './core/target.js';
 import { twistModel, maxTwistDeg, quarterTurnLength } from './core/twist.js';
 import { idealPath, sampleFrame, knotGrid, spanCosts, placeKnots, solveAngles, pathFromKnots, pathLightness, blur1 } from './core/solve.js';
@@ -46,6 +47,22 @@ export function problemWith(s) {
  * @param {{onProgress?:(stage:string)=>void}} opts
  */
 export function runPipeline(rgba, settings, opts = {}) {
+  // The box's back wall sits against the deepest comb, and comb depths follow
+  // the angles (core/fab.js rowDepth): solve with the deepest a comb can be,
+  // then once more with the depth that came out, if it moved the wall.
+  const first = solveOnce(rgba, settings, opts);
+  const deepest = planDepth(first);
+  if (Math.abs(backdropDistance({ ...first.s, backDepth: deepest }) - backdropDistance(first.s)) < 0.25) {
+    first.s.backDepth = deepest;
+    return first;
+  }
+  if (opts.onProgress) opts.onProgress('again, for the box\'s depth');
+  const second = solveOnce(rgba, { ...settings, backDepth: deepest }, opts);
+  second.s.backDepth = planDepth(second);
+  return second;
+}
+
+function solveOnce(rgba, settings, opts = {}) {
   const s = { ...DEFAULTS, ...settings };
   const progress = opts.onProgress || (() => {});
   const bad = problemWith(s);

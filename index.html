@@ -281,13 +281,12 @@
         <div class="group" id="combFab">
           <div class="row" title="added to the slot's length and width"><label for="slotClear">Slot clearance</label><input type="number" id="slotClear" class="len" min="0" step="any"><span class="unit u"></span></div>
           <div class="row" title="narrowest slot the cutter should make"><label for="minSlot">Least slot width</label><input type="number" id="minSlot" class="len" min="0" step="any"><span class="unit u"></span></div>
-          <div class="row" title="comb material in front of and behind the slots"><label for="combMargin">Comb margin</label><input type="number" id="combMargin" class="len" min="0" step="any"><span class="unit u"></span></div>
-          <div class="row" title="comb beyond the outermost ribbons, for mounting"><label for="combEnd">Comb ends</label><input type="number" id="combEnd" class="len" min="0" step="any"><span class="unit u"></span></div>
-          <div class="row"><label for="holeDia">Mounting holes</label><input type="number" id="holeDia" class="len" min="0" step="any"><span class="unit u"></span></div>
+          <div class="row" title="comb material in front of and behind each row's farthest-reaching slot (each comb is only as deep as its own row needs)"><label for="combMargin">Comb margin</label><input type="number" id="combMargin" class="len" min="0" step="any"><span class="unit u"></span></div>
+          <div class="row" title="comb beyond the outermost ribbons; its tabs plug into the box's side panels"><label for="combEnd">Comb ends</label><input type="number" id="combEnd" class="len" min="0" step="any"><span class="unit u"></span></div>
           <div class="row" title="longest comb piece your cutter takes; longer combs are cut between ribbons"><label for="bedMm">Cutter bed</label><input type="number" id="bedMm" class="len" min="0" step="any"><span class="unit u"></span></div>
           <div class="row"><label for="minWeb">Least web</label><input type="number" id="minWeb" class="len" min="0" step="any"><span class="unit u"></span></div>
           <div class="row" title="the sheet the combs and pin tabs are cut from"><label for="combThick">Sheet thickness</label><input type="number" id="combThick" class="len" min="0" step="any"><span class="unit u"></span></div>
-          <label class="check" title="cut each comb along its centre line, so ribbons are laid into notches and clamped instead of threaded"><input type="checkbox" id="splitComb"> Split combs for assembly</label>
+          <label class="check" title="cut each comb in two along a zigzag: the back half has a V at every ribbon leading into the half-slot, so ribbons are laid in rather than threaded, then the front half closes over them"><input type="checkbox" id="splitComb"> Split combs for assembly (zigzag)</label>
           <p class="note" id="combNote"></p>
         </div>
         <div class="group" id="clipFab" hidden>
@@ -303,6 +302,8 @@
         <div class="buttons">
           <button class="primary" id="exportCombsSVG" title="every comb row, stacked on one sheet: cut red, engrave blue">Combs SVG</button>
           <button id="exportCombsDXF">Combs DXF</button>
+          <button id="exportSideSVG" title="the box's side panel (cut two) with a slot for every comb tab at its row's height">Side panel SVG</button>
+          <button id="exportSideDXF">Side panel DXF</button>
           <button id="exportCSV" title="every bracket: height, slot angle, and the twist since the one above (size and direction)">Bracket list CSV</button>
           <button id="exportTemplate" title="1:1 wall template with a dial at every bracket">Wall template SVG</button>
           <button id="exportJson" title="the whole plan: every ribbon's brackets and angles">Plan JSON</button>

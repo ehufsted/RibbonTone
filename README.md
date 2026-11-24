@@ -41,7 +41,10 @@ or pinch to zoom. Presets include the design viewpoint, which matches the Previe
 
 ## Outputs
 
-- Combs as SVG or DXF (cut red, engrave blue; long combs split to fit the cutter bed).
+- Combs as SVG or DXF (cut red, engrave blue; long combs split to fit the cutter bed), each only as deep as its row
+  needs, with tabs into the box's side panels; optionally split front from back along a zigzag, so ribbons are laid
+  into V notches instead of threaded.
+- The box's side panel (cut two), with a slot for every comb tab.
 - A bracket list as CSV: height, slot angle, and the twist since the bracket above (size and direction).
 - A 1:1 wall template.
 - With wall pins: the pin clips (SVG/DXF, packed for the cutter) and the back panel with a slot per clip.

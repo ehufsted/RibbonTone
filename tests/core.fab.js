@@ -1,6 +1,6 @@
-import { section, check, num, plain, vRamp } from './runner.js';
+import { section, check, num, plain, vRamp, mkRand } from './runner.js';
 import { runPipeline } from '../src/pipeline.js';
-import { clipShapes, unionConvex, polyArea, pinClipPieces, backPanelPiece, packPieces, BOX_WALL, slotRect, planCombs, combRow, calibrationCombs, stackPieces, piecesSVG, piecesDXF, bracketList, bracketCSV, wallTemplateSVG, polyDistance, combDepth } from '../src/core/fab.js';
+import { rowDepth, combLayout, planDepth, sidePanelPiece, clipShapes, unionConvex, polyArea, pinClipPieces, backPanelPiece, packPieces, BOX_WALL, slotRect, planCombs, combRow, calibrationCombs, stackPieces, piecesSVG, piecesDXF, bracketList, bracketCSV, wallTemplateSVG, polyDistance, combDepth } from '../src/core/fab.js';
 
 const edgeAngle = (p, q, yUp) => (Math.atan2(yUp ? q[1] - p[1] : p[1] - q[1], q[0] - p[0]) * 180) / Math.PI;
 
@@ -8,7 +8,7 @@ export function run() {
   section('core.fab', 'A slot runs along the ribbon\'s cross-section, (cos θ, −sin θ) with the drawing\'s y toward the viewer: ' +
     'face-on (0°) it lies along the comb, edge-on (90°) across it. Every row cuts one slot per ribbon, split pieces fit the bed, ' +
     'and the DXF (y up) shows the same angles as the SVG (y down), not their mirror images.');
-  const s = { ...plain, slotClear: 0.6, minSlot: 1, combMargin: 8, combEnd: 30, holeDia: 5, bedMm: 600, splitComb: false, minWeb: 2 };
+  const s = { ...plain, slotClear: 0.6, minSlot: 1, combMargin: 8, combEnd: 30, bedMm: 600, splitComb: false, minWeb: 2, combThick: 3 };
   const r0 = slotRect(0, 0, 0, s), r90 = slotRect(0, 0, 90, s);
   check('0°: the slot\'s long side lies along the comb (20.6 mm in x)', Math.abs(r0[1][0] - r0[0][0] - 20.6) < 1e-9 && Math.abs(r0[1][1] - r0[0][1]) < 1e-9);
   check('90°: across the comb (20.6 mm in y)', Math.abs(Math.abs(r90[1][1] - r90[0][1]) - 20.6) < 1e-9 && Math.abs(r90[1][0] - r90[0][0]) < 1e-9);
@@ -38,11 +38,61 @@ export function run() {
   const lines = dxf.split('\n');
   const verts = [];
   for (let i = 0; i < lines.length; i++) if (lines[i] === 'VERTEX') verts.push([Number(lines[i + 4]), Number(lines[i + 6])]);
-  const slotD = verts.slice(4, 8);
+  const nOut = one.pieces[0].cuts[0].pts.length;   // the outline (with its tabs) comes first
+  const slotD = verts.slice(nOut, nOut + 4);
   const aSvg = edgeAngle(path[0], path[1], false), aDxf = edgeAngle(slotD[0], slotD[1], true);
   check('a 30° slot reads 30° in the SVG and in the DXF', Math.abs(aSvg - 30) < 1e-3 && Math.abs(aDxf - 30) < 1e-3, `SVG ${num(aSvg, 3)}°, DXF ${num(aDxf, 3)}°`);
-  check('comb depth = w + clearance + 2 margins = 36.6 mm', Math.abs(combDepth(s) - 36.6) < 1e-9);
-  check('split combs get a centre cut', combRow([0, 30], [0, 0], ['1', '2'], 'R', { ...s, splitComb: true }).pieces[0].cuts.some((c) => c.kind === 'line'));
+  check('the deepest a comb can be: w + clearance + 2 margins = 36.6 mm', Math.abs(combDepth(s) - 36.6) < 1e-9);
+
+  section('core.fab: comb depth, tabs and the split', 'Each comb is only as deep as its own row needs: its farthest-reaching slot ' +
+    'plus the margin, front and back. Its ends carry tabs into the side panels. A split comb is cut along a zigzag through every slot ' +
+    'and up to a peak between ribbons; the cut must never cross a slot it does not pass through, nor come within the least web of one.');
+  check('a face-on row: slot width + 2 margins = 1 + 16 = 17 mm deep', Math.abs(rowDepth([0, 0, 0], s) - 17) < 1e-9, num(rowDepth([0, 0, 0], s), 3));
+  check('a row with one ribbon at 90°: slot length + 2 margins = 36.6 mm', Math.abs(rowDepth([0, 90, 10], s) - 36.6) < 1e-9);
+  const depths = new Set(combs.pieces.map((p) => Math.round(p.h * 1000)));
+  check('the plan\'s combs come in different depths, each its row\'s', depths.size > 1 && combs.pieces.every((p) => p.h <= combDepth(s) + 1e-9), [...depths].map((d) => num(d / 1000, 1)).join(', '));
+  const solo = combRow([0, 30, 60], [0, 0, 0], ['1', '2', '3'], 'R', s).pieces[0];
+  check('a whole comb: tabs at both ends, 12 corners, BOX_WALL longer each end', solo.cuts[0].pts.length === 12 && Math.abs(solo.w - (60 + 2 * 30 + 2 * BOX_WALL)) < 1e-9,
+    `${solo.cuts[0].pts.length} corners, ${num(solo.w, 1)} mm`);
+  check('no mounting holes any more', !solo.cuts.some((c) => c.kind === 'circle'));
+  const sp = { ...s, splitComb: true };
+  const twoTabs = combRow([0, 30], [0, 0], ['1', '2'], 'R', sp).pieces[0];
+  check('a split comb: a tab for each half at each end (20 corners)', twoTabs.cuts[0].pts.length === 20, `${twoTabs.cuts[0].pts.length}`);
+  // the zigzag over many seeded rows
+  const rnd = mkRand(7);
+  let through = true, crossOwn = false, web = Infinity, inside = true, ends = true;
+  for (let k = 0; k < 60; k++) {
+    const xsZ = Array.from({ length: 8 }, (_, i) => i * 30);
+    const ang = xsZ.map(() => rnd() * 180 - 90);
+    const lay = combLayout(xsZ, ang, sp);
+    const zig = lay.zig, D = lay.D;
+    if (Math.abs(zig[0].p[0]) > 1e-9 || Math.abs(zig[0].p[1] - D / 2) > 1e-9 || Math.abs(zig[zig.length - 1].q[0] - lay.total) > 1e-9) ends = false;
+    if (zig.filter((g) => g.air).length !== xsZ.length) through = false;
+    for (let i = 1; i < zig.length; i++) if (Math.hypot(zig[i].p[0] - zig[i - 1].q[0], zig[i].p[1] - zig[i - 1].q[1]) > 1e-9) through = false;
+    for (const g of zig) {
+      if (g.air) continue;
+      for (const q of [g.p, g.q]) if (!(q[1] > 0 && q[1] < D)) inside = false;
+      lay.slots.forEach((P) => {
+        // shorten the segment a hair at each end: touching a slot at its own end is the point
+        const dx = g.q[0] - g.p[0], dy = g.q[1] - g.p[1], L = Math.hypot(dx, dy) || 1, e = 1e-3 / L;
+        const a = [g.p[0] + dx * e, g.p[1] + dy * e], b = [g.q[0] - dx * e, g.q[1] - dy * e];
+        const d = polyDistance([a, b], P);
+        if (d === 0) crossOwn = true;
+      });
+    }
+    web = Math.min(web, combRow(xsZ, ang, xsZ.map(() => ''), 'Z', sp).web);
+  }
+  check('the zigzag runs from end to end through both ends of every slot', ends && through);
+  check('the zigzag never crosses a slot (apart from running along inside it)', !crossOwn);
+  check('the zigzag stays inside the comb', inside);
+  check('60 random rows at 30 mm pitch: the least web is reported and stays above 0', web > 0 && isFinite(web), `${num(web, 2)} mm`);
+  const zz = combRow([0, 30], [0, 0], ['1', '2'], 'R', sp).pieces[0];
+  check('the split cut is written as open paths (no closing line)', zz.cuts.some((c) => c.kind === 'path') && /<path d="M[^"Z]+"\/>/.test(piecesSVG(stackPieces([zz]))));
+  const side = sidePanelPiece(plan);
+  const rowsN = plan.rows.length;
+  check(`side panel: one slot per comb tab (${rowsN} rows × 1)`, side.cuts.length === rowsN + 1);
+  check('side panel: as deep as the deepest comb', Math.abs(side.w - planDepth(plan)) < 1e-9, `${num(side.w, 2)} mm`);
+  check('split combs: two tab slots per row', sidePanelPiece({ ...plan, s: { ...plan.s, splitComb: true } }).cuts.length === 2 * rowsN + 1);
 
   const cal = calibrationCombs(s, 15);
   check('calibration: −90…90 in 15° steps is 13 slots, cut twice', cal.angles.length === 13 && cal.pieces.length === 2);
