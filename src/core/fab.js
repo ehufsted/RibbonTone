@@ -180,8 +180,10 @@ function dogleg(e, centre, far, slot, D, total, s) {
  *   the least material between two slots, or between the split's cut and a
  *   slot it does not pass through, in this row, mm
  */
-export function combRow(xs, angles, labels, title, s) {
-  const { D, x0, total, slots, zig, tabs } = combLayout(xs, angles, s);
+export function combRow(xs, angles, labels, title, s, opts = {}) {
+  // opts.mount: 'tabs' (into the side panels, the default) or 'holes' (the calibration combs: no side panels)
+  const holes = opts.mount === 'holes';
+  const { D, x0, total, slots, zig, tabs } = combLayout(xs, angles, holes ? { ...s, splitComb: false } : s);
   let web = Infinity;
   for (let i = 0; i + 1 < slots.length; i++) web = Math.min(web, polyDistance(slots[i], slots[i + 1]));
   for (const g of zig) {
@@ -192,15 +194,21 @@ export function combRow(xs, angles, labels, title, s) {
       web = Math.min(web, polyDistance([g.p, g.q], P));
     });
   }
-  const T = BOX_WALL;
-  const cutsAt = splitPoints(xs.slice(1).map((x, i) => (xs[i] + x) / 2 - x0), total, s.bedMm);
+  const T = holes ? 0 : BOX_WALL;
+  // split with the end tabs counted: each end piece is T longer than its share of the comb
+  const mids = xs.slice(1).map((x, i) => (xs[i] + x) / 2 - x0);
+  const cutsAt = splitPoints(mids.map((m) => m + T), total + 2 * T, s.bedMm).map((c, i, all) => (i === 0 ? 0 : i === all.length - 1 ? total : c - T));
   const pieces = [];
   for (let p = 0; p + 1 < cutsAt.length; p++) {
     const a = cutsAt[p], b = cutsAt[p + 1], w = b - a;
     const left = p === 0, right = p === cutsAt.length - 2;
     const off = left ? T : 0;                     // the left tabs reach to x = 0
     const X = (x) => x - a + off;
-    const cuts = [{ kind: 'poly', pts: tabbedOutline(w, D, left ? tabs : [], right ? tabs : [], T).map(([x, y]) => [x + off, y]) }];
+    const cuts = [{ kind: 'poly', pts: tabbedOutline(w, D, left && !holes ? tabs : [], right && !holes ? tabs : [], T).map(([x, y]) => [x + off, y]) }];
+    if (holes) {
+      if (left) cuts.push({ kind: 'circle', cx: s.combEnd / 2 + 2, cy: D / 2, r: CAL_HOLE / 2 });
+      if (right) cuts.push({ kind: 'circle', cx: w - s.combEnd / 2 - 2, cy: D / 2, r: CAL_HOLE / 2 });
+    }
     const engrave = [];
     xs.forEach((x, i) => {
       const cxi = x - x0;
@@ -343,14 +351,19 @@ export function sidePanelPiece(plan) {
   return { w, h, cuts, engrave, name: 'SIDE PANEL' };
 }
 
+/** The calibration combs' mounting holes, mm. */
+export const CAL_HOLE = 5;
+
 /** The calibration comb: one slot per test angle, at the design pitch. Cut two. */
 export function calibrationCombs(s, step = 15) {
   const angles = [];
   for (let a = -90; a <= 90 + 1e-9; a += step) angles.push(a);
   const xs = angles.map((_, i) => i * s.pitch);
   const labels = angles.map((a) => `${a > 0 ? '+' : ''}${Math.round(a)}`);
-  const top = combRow(xs, angles, labels, 'CAL TOP', { ...s, bedMm: Infinity });
-  const bot = combRow(xs, angles, labels, 'CAL BOTTOM', { ...s, bedMm: Infinity });
+  // a test rig, not the box: plain mounting holes, no tabs, never split
+  const cs = { ...s, bedMm: Infinity, combEnd: Math.max(s.combEnd, CAL_HOLE + 6) };
+  const top = combRow(xs, angles, labels, 'CAL TOP', cs, { mount: 'holes' });
+  const bot = combRow(xs, angles, labels, 'CAL BOTTOM', cs, { mount: 'holes' });
   return { pieces: [...top.pieces, ...bot.pieces], angles, web: top.web };
 }
 

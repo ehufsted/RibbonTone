@@ -52,9 +52,9 @@ export function misalignment(thA, thB) {
 }
 
 /** Mean |ΔL| × 100 of a path against a target, through a lightness LUT. */
-function toneError(Llut, th, Lt, m) {
+function toneError(light, th, Lt, m) {
   let e = 0;
-  for (let j = 0; j < th.length; j++) e += Math.abs(lutAt(Llut, m(th[j])) - Lt[j]);
+  for (let j = 0; j < th.length; j++) e += Math.abs(light(m(th[j]), j) - Lt[j]);
   return (100 * e) / (th.length || 1);
 }
 
@@ -65,14 +65,17 @@ function toneError(Llut, th, Lt, m) {
  * @param {number} w  alignment weight, −1 … 1
  * @param {number[]} [alphas]  each ribbon's direction to the viewer (degrees);
  *   the mirror is about it (0s: about the wall)
+ * @param {(i, th, j) => number} [lightAt]  ribbon i's lightness at angle th and
+ *   sample j, where it is more than the LUT (comb shadows); default the LUT
  * @returns {boolean[]}  mirror this ribbon?
  */
-export function chooseMirrors(paths, Lluts, targets, w, alphas = null) {
+export function chooseMirrors(paths, Lluts, targets, w, alphas = null, lightAt = null) {
   const N = paths.length;
   if (!N) return [];
   const mir = (i) => { const a2 = 2 * (alphas ? alphas[i] : 0); return (v) => a2 - v; };
   const same = (v) => v;
-  const unary = paths.map((th, i) => [toneError(Lluts[i], th, targets[i], same), toneError(Lluts[i], th, targets[i], mir(i))]);
+  const light = (i) => (lightAt ? (th, j) => lightAt(i, th, j) : (th) => lutAt(Lluts[i], th));
+  const unary = paths.map((th, i) => [toneError(light(i), th, targets[i], same), toneError(light(i), th, targets[i], mir(i))]);
   // pairwise, all four ways (mirrors about slightly different directions do not cancel exactly)
   const pair = [];
   for (let i = 1; i < N; i++) {

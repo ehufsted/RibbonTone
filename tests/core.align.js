@@ -33,6 +33,22 @@ export function run() {
     check(`alignment ${w > 0 ? '+' : ''}${w}: the choice equals brute force over all ${1 << N} mirrorings`, Math.abs(cost(pick) - best) < 1e-9, `${num(cost(pick), 4)} vs ${num(best, 4)}`);
   }
 
+  // with a lightness that is more than the LUT (as with comb shadows), the choice must use it
+  const bias = (i, th, j) => lutAt(L, th) + (Math.sin((th * Math.PI) / 90) > 0 ? 0.05 : 0) * (j % 2);
+  for (const w of [1, 0]) {
+    const pick = chooseMirrors(paths, Ls, targets, w, null, bias);
+    const toneB = (th, t, sg, i) => { let e = 0; for (let j = 0; j < n; j++) e += Math.abs(bias(i, sg * th[j], j) - t[j]); return (100 * e) / n; };
+    const cost = (bits) => {
+      let c = 0;
+      bits.forEach((b, i) => { c += toneB(paths[i], targets[i], b ? -1 : 1, i); });
+      for (let i = 1; i < N; i++) c += 2 * w * misalignment(paths[i - 1].map((v) => (bits[i - 1] ? -v : v)), paths[i].map((v) => (bits[i] ? -v : v)));
+      return c;
+    };
+    let best = Infinity;
+    for (let m = 0; m < 1 << N; m++) best = Math.min(best, cost(Array.from({ length: N }, (_, i) => !!(m & (1 << i)))));
+    check(`with a lightness beyond the LUT (alignment ${w}): still equals brute force`, Math.abs(cost(pick) - best) < 1e-9, `${num(cost(pick), 4)} vs ${num(best, 4)}`);
+  }
+
   section('core.align: a viewer walking past', 'The whole chain on a picture with structure, front light (so mirroring costs no tone), ' +
     'seen 1 m to either side. Aligned neighbours (+1) change together: the fewest stripes, and a steadier blended picture than no ' +
     'preference (0), whose haphazard directions do neither. Opposed ones (−1) change in opposite directions, which cancels where the ' +

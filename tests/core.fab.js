@@ -109,8 +109,13 @@ export function run() {
   check('no bed limit: pieces pack onto a roughly square sheet, not one tall column', square.W > 10 && square.H < 4 * 40, `${num(square.W, 0)} × ${num(square.H, 0)} mm`);
   check('split combs: two tab slots per row', sidePanelPiece({ ...plan, s: { ...plan.s, splitComb: true } }).cuts.length === 2 * rowsN + 1);
 
-  const cal = calibrationCombs(s, 15);
+  // the end tabs once came after the split: a 590.6 mm comb on a 600 mm bed made one 602.6 mm piece
+  const near = combRow(Array.from({ length: 18 }, (_, i) => i * 30), new Array(18).fill(0), new Array(18).fill(''), 'R', s);
+  check('a comb just under the bed, tabs and all: every piece fits the 600 mm bed', near.pieces.every((p) => p.w <= 600 + 1e-9), near.pieces.map((p) => num(p.w, 1)).join(', ') + ' mm');
+  const cal = calibrationCombs({ ...s, splitComb: true }, 15);
   check('calibration: −90…90 in 15° steps is 13 slots, cut twice', cal.angles.length === 13 && cal.pieces.length === 2);
+  check('calibration combs: two mounting holes each, no tabs (a plain 4-corner outline), never split',
+    cal.pieces.every((p) => p.cuts.filter((c) => c.kind === 'circle').length === 2 && p.cuts[0].pts.length === 4 && !p.cuts.some((c) => c.kind === 'path')));
 
   const list = bracketList(plan);
   const knots = plan.ribbons.reduce((a, r) => a + r.knots.length, 0);

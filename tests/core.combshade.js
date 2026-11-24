@@ -3,7 +3,8 @@
 import { section, check, num, plain, flatRGBA } from './runner.js';
 import { shadeSlope, makeShade, shadeCutoffs } from '../src/core/combshade.js';
 import { pitchModel, backdropY } from '../src/core/optics.js';
-import { runPipeline } from '../src/pipeline.js';
+import { runPipeline, offAxisDistortion } from '../src/pipeline.js';
+import { planDepth } from '../src/core/fab.js';
 import { blur1 } from '../src/core/solve.js';
 
 const wrap90 = (a) => ((((a + 90) % 180) + 180) % 180) - 90;
@@ -64,6 +65,10 @@ export function run() {
     return a / (c || 1);
   };
   check('in the bands, ribbons turn more face-on to make up for the lost light', faceOn(on) < faceOn(off), `${num(faceOn(on), 1)}° vs ${num(faceOn(off), 1)}° from face-on`);
+  check('the back wall is at least as deep as the deepest comb that came out', on.s.backDepth >= planDepth(on) - 1e-9, `${num(on.s.backDepth, 2)} vs ${num(planDepth(on), 2)}`);
+  // the walk-by figures once compared shaded against unshaded, so the bands counted as off-axis change
+  const still = offAxisDistortion(on.ribbons, on.s, on.xv, null, on.n, on.dy, 0, { zc: cut, W: on.combShade.W });
+  check('walk-by figures with comb shadows: a viewer who does not move sees no change', still.tone < 1e-6 && still.stripes < 1e-6, `${num(still.stripes, 4)} / ${num(still.tone, 4)}`);
   const glass = runPipeline(grey, { ...base, combShadows: true, combLook: 'clear' });
   check('clear combs: nothing modelled, with a note', glass.combShade === null && glass.notes.some((t) => /clear combs cast almost no shadow/.test(t)));
   const level = runPipeline(grey, { ...base, combShadows: true, lightEl: 0 });

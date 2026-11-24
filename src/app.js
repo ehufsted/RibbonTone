@@ -181,7 +181,9 @@ function changed(id) {
   save();
   // the comb look decides whether comb shadows are modelled, so with that on it re-solves
   if (id === 'combLook') showLayout();
-  if (FAB_ONLY.has(id) || (VIEW_ONLY.has(id) && !(id === 'combLook' && state.set.combShadows))) {
+  // the comb look and the sheet's thickness feed the comb-shadow model: with it on, they re-solve
+  const shading = state.set.combShadows && (id === 'combLook' || id === 'combThick');
+  if ((FAB_ONLY.has(id) || VIEW_ONLY.has(id)) && !shading) {
     if (FAB_ONLY.has(id)) { updateNotes(); state.scene = null; }
     if (state.view === 'view3d') paint();
     return;
@@ -706,6 +708,14 @@ function updateNotes() {
     const c = planCombs(fp);
     combMsg = `${c.pieces.length} comb pieces${plan.rows && plan.hold !== 'pins' ? '' : ' (the top and bottom bars)'} · ` +
       `deepest ${lenTxt(planDepth(fp))} · least web ${lenTxt(c.web)}`;
+    const bed = state.set.bedMm;
+    if (bed > 0) {
+      const side = sidePanelPiece(fp), panels = [['side panel', side]];
+      if (plan.hold === 'pins') panels.push(['back panel', backPanelPiece(fp)]);
+      for (const [name, pc] of panels) {
+        if (Math.max(pc.w, pc.h) > bed) items.push(`the ${name} (${lenTxt(pc.w)} × ${lenTxt(pc.h)}) is longer than the cutter bed: cut it on a larger machine, or from board by hand`);
+      }
+    }
     if (c.web < state.set.minWeb) {
       items.push(`comb material comes down to ${lenTxt(c.web)} (between slots${state.set.splitComb ? ', or the split\'s cut and a slot' : ''}), under the least web (${lenTxt(state.set.minWeb)}): widen the pitch`);
     }

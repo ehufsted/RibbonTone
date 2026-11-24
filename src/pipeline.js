@@ -19,9 +19,9 @@
 //     layout, hold, range, kmaxDeg, quarterTurn, curvePts, s, stats, notes }
 
 import { DEFAULTS, pieceGeometry, toneLuminance, MAX_RIBBONS, MAX_SAMPLES, lenText } from './core/units.js';
-import { viewAngle, ribbonLUT, lightnessLUT, parseCurve, backdropDistance } from './core/optics.js';
+import { viewAngle, ribbonLUT, lightnessLUT, parseCurve, backdropDistance, lutAt } from './core/optics.js';
 import { planDepth, combDepth, combRowsOf, rowDepth } from './core/fab.js';
-import { shadeSlope, makeShade, shadeCutoffs } from './core/combshade.js';
+import { shadeSlope, makeShade, shadeCutoffs, shades } from './core/combshade.js';
 import { chooseMirrors } from './core/align.js';
 import { sampleColumns, reachRange, toneMap } from './core/target.js';
 import { twistModel, maxTwistDeg, quarterTurnLength } from './core/twist.js';
@@ -87,7 +87,12 @@ export function runPipeline(rgba, settings, opts = {}) {
   if (opts.onProgress) opts.onProgress(first.combShade ? 'again, with each comb\'s depth' : 'again, for the box\'s depth');
   const rowDepths = combRowsOf(first).map((r) => ({ y: r.y, D: rowDepth(r.angles, first.s) }));
   const second = solveOnce(rgba, { ...settings, backDepth: deepest, rowDepths }, opts);
-  second.s.backDepth = planDepth(second);
+  // the wall the solve assumed stays, unless this solve's combs came out deeper still
+  const deeper = planDepth(second);
+  second.s.backDepth = Math.max(deepest, deeper);
+  if (deeper > deepest + 0.25) {
+    second.notes.push(`the deepest comb came out ${lenText(deeper - deepest, second.s.units)} deeper than the solve assumed: the back wall sits there, a little behind what the shadows were modelled for`);
+  }
   return second;
 }
 
@@ -229,7 +234,9 @@ function solveOnce(rgba, settings, opts = {}) {
 
   progress('choosing twist directions');
   // mirror whole ribbons where it helps the tone, or lines neighbours up (core/align.js)
-  const mirror = chooseMirrors(ribbons.map((r) => r.th), Llut, Lt, s.align, alphas);
+  // scored with the comb shadows where they are modelled (mirroring changes how much a shadow covers)
+  const lightAt = shadeOn ? (i, th, j) => (shades(zc[j], shadeModels[i]) ? shadeModels[i].L(th, zc[j]) : lutAt(Llut[i], th)) : null;
+  const mirror = chooseMirrors(ribbons.map((r) => r.th), Llut, Lt, s.align, alphas, lightAt);
   let mirrored = 0;
   ribbons.forEach((r, i) => {
     if (!mirror[i]) return;
@@ -258,7 +265,7 @@ function solveOnce(rgba, settings, opts = {}) {
   progress('checking');
   const stats = planStats(ribbons, model, kmaxDeg, n, dy, s.pitch);
   stats.mirrored = mirrored;
-  stats.offAxis = offAxisDistortion(ribbons, s, xv, curvePts, n, dy, OFF_AXIS_MM);
+  stats.offAxis = offAxisDistortion(ribbons, s, xv, curvePts, n, dy, OFF_AXIS_MM, shadeOn ? { zc, W: backdropDistance(s) } : null);
   stats.ribbons = N;
   stats.rows = rows ? rows.length - 2 : null;
   if (stats.coil > 0.5) notes.push(`low tension: the most twisted span carries ${Math.round(stats.coil * 100)}% of the torque that can make a ribbon coil — raise the bar's tension`);
@@ -300,12 +307,17 @@ export const OFF_AXIS_MM = 1000;
  * close. Aligned ones change together: few stripes, and a steadier blend than
  * ribbons turned every which way.
  */
-export function offAxisDistortion(ribbons, s, xv, curvePts, n, dy, walk) {
+export function offAxisDistortion(ribbons, s, xv, curvePts, n, dy, walk, combShade = null) {
   const here = ribbons.map((r) => r.L);
   const hereMix = seenMix(here, dy, s.pitch);
   let tone = 0, stripes = 0;
   for (const dx of [-walk, walk]) {
-    const there = ribbons.map((r) => pathLightness(lightnessLUT(ribbonLUT(s, viewAngle(r.x, xv + dx, s.distM), curvePts)), r.th));
+    // the moved viewer sees the same comb shadows (the design view's L has them): only the view changes
+    const there = ribbons.map((r) => {
+      const al = viewAngle(r.x, xv + dx, s.distM);
+      const shade = combShade ? makeShade(s, al, combShade.W) : null;
+      return pathLightness(lightnessLUT(ribbonLUT(s, al, curvePts)), r.th, shade, combShade && combShade.zc);
+    });
     const thereMix = seenMix(there, dy, s.pitch);
     let mean = 0, cnt = 0;
     thereMix.forEach((c, i) => c.forEach((v, j) => { mean += v - hereMix[i][j]; cnt++; }));
