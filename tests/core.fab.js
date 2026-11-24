@@ -22,7 +22,7 @@ export function run() {
   check('neighbouring slots keep the least web (2 mm)', combs.web >= 2, `${num(combs.web, 2)} mm`);
   const long = combRow(Array.from({ length: 40 }, (_, i) => i * 30), new Array(40).fill(20), new Array(40).fill(''), 'R', s);
   const pieceSlots = long.pieces.reduce((a, p) => a + p.cuts.filter((c) => c.kind === 'poly').length - 1, 0);
-  check('a 1230 mm comb on a 600 mm bed: three pieces of about equal length, every one fits, no slot lost', long.pieces.length === 3 && Math.min(...long.pieces.map((p) => p.w)) > 350 && long.pieces.every((p) => p.w <= 600 + 1e-9) && pieceSlots === 40,
+  check('a 1250.6 mm comb on a 600 mm bed: three pieces of about equal length, every one fits, no slot lost', long.pieces.length === 3 && Math.min(...long.pieces.map((p) => p.w)) > 350 && long.pieces.every((p) => p.w <= 600 + 1e-9) && pieceSlots === 40,
     `${long.pieces.length} pieces of ${long.pieces.map((p) => num(p.w, 0)).join(', ')} mm`);
   // a bed of 0 once ran ceil(total / 0) = Infinity rounds and froze the page at start-up
   const mids = Array.from({ length: 39 }, (_, i) => 15 + 30 * i);
@@ -57,7 +57,8 @@ export function run() {
   const depths = new Set(combs.pieces.map((p) => Math.round(p.h * 1000)));
   check('the plan\'s combs come in different depths, each its row\'s', depths.size > 1 && combs.pieces.every((p) => p.h <= combDepth(s) + 1e-9), [...depths].map((d) => num(d / 1000, 1)).join(', '));
   const solo = combRow([0, 30, 60], [0, 0, 0], ['1', '2', '3'], 'R', s).pieces[0];
-  check('a whole comb: tabs at both ends, 12 corners, BOX_WALL longer each end', solo.cuts[0].pts.length === 12 && Math.abs(solo.w - (60 + 2 * 30 + 2 * BOX_WALL)) < 1e-9,
+  check('a whole comb: tabs at both ends, 12 corners; its ends 30 mm past the outer slots\' far ends (10.3 mm out), BOX_WALL more for the tabs',
+    solo.cuts[0].pts.length === 12 && Math.abs(solo.w - (60 + 2 * (10.3 + 30) + 2 * BOX_WALL)) < 1e-9,
     `${solo.cuts[0].pts.length} corners, ${num(solo.w, 1)} mm`);
   check('no mounting holes any more', !solo.cuts.some((c) => c.kind === 'circle'));
   const sp = { ...s, splitComb: true };

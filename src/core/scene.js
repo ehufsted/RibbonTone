@@ -25,7 +25,7 @@
 //   depth is the deepest comb's; with pins the back wall sits `standoff`
 //   behind the ribbons instead.
 
-import { slotRect, clipShapes, combLayout, combRowsOf, planDepth, BOX_WALL } from './fab.js';
+import { slotRect, clipShapes, combLayout, combRowsOf, planDepth, combEnds, BOX_WALL } from './fab.js';
 
 export { BOX_WALL };
 
@@ -122,7 +122,7 @@ export function buildScene(plan, s) {
   const pins = s.hold === 'pins';
   const zFront = D / 2;
   const zBack = pins ? -Math.max(s.standoff, D / 2) : -D / 2;
-  const bx0 = xs[0] - s.combEnd, bx1 = xs[xs.length - 1] + s.combEnd;
+  const [bx0, bx1] = combEnds(xs, s);
 
   // ribbons: a strip per ribbon, two triangles between stations
   const rib = mesh();

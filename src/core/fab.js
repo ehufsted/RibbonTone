@@ -64,6 +64,16 @@ export function slotReach(th, s) {
   return (L / 2) * Math.abs(Math.sin(th * RAD)) + (Wd / 2) * Math.abs(Math.cos(th * RAD));
 }
 
+/**
+ * Where every comb starts and ends on the piece: `combEnd` beyond the farthest
+ * the outer ribbons' slots can reach sideways (half a slot, face-on). One
+ * length for all rows, since every comb's tabs plug into the same side panels.
+ */
+export function combEnds(xs, s) {
+  const reach = (s.ribbonW + s.slotClear) / 2 + s.combEnd;
+  return [xs[0] - reach, xs[xs.length - 1] + reach];
+}
+
 /** A comb row's depth: its farthest-reaching slot, plus the margin front and back. */
 export const rowDepth = (angles, s) => 2 * Math.max(...angles.map((a) => slotReach(a, s))) + 2 * s.combMargin;
 
@@ -87,7 +97,7 @@ export function combTabs(D, s) {
  */
 export function combLayout(xs, angles, s) {
   const D = rowDepth(angles, s);
-  const x0 = xs[0] - s.combEnd, total = xs[xs.length - 1] - xs[0] + 2 * s.combEnd;
+  const [x0, x1] = combEnds(xs, s), total = x1 - x0;
   const cx = xs.map((x) => x - x0);
   const slots = cx.map((x, i) => slotRect(x, D / 2, angles[i], s));
   const zig = s.splitComb ? zigzag(cx, angles, D, total, s) : [];
@@ -474,7 +484,7 @@ export function pinClipPieces(plan) {
  */
 export function backPanelPiece(plan) {
   const s = plan.s, H = plan.piece.H, xs = plan.ribbons.map((r) => r.x);
-  const x0 = xs[0] - s.combEnd - BOX_WALL, x1 = xs[xs.length - 1] + s.combEnd + BOX_WALL;
+  const [e0, e1] = combEnds(xs, s), x0 = e0 - BOX_WALL, x1 = e1 + BOX_WALL;
   const yTop = H + s.combThick / 2 + BOX_WALL, yBot = -s.combThick / 2 - BOX_WALL;
   const w = x1 - x0, h = yTop - yBot;
   const cuts = [{ kind: 'poly', pts: [[0, 0], [w, 0], [w, h], [0, h]] }], engrave = [];

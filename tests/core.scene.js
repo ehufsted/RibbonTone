@@ -43,7 +43,8 @@ export function run() {
   const cx = extent(sc.combs[1].pos, 0), cz = extent(sc.combs[1].pos, 2), cy = extent(sc.combs[1].pos, 1);
   const xs = plan.ribbons.map((q) => q.x);
   check('a comb spans the outer ribbons plus its ends and tabs, its row\'s depth, and the sheet thickness',
-    Math.abs(cx[0] - (xs[0] - plan.s.combEnd - BOX_WALL)) < 1e-3 && Math.abs(cx[1] - (xs[xs.length - 1] + plan.s.combEnd + BOX_WALL)) < 1e-3 &&
+    Math.abs(cx[0] - (xs[0] - (plan.s.ribbonW + plan.s.slotClear) / 2 - plan.s.combEnd - BOX_WALL)) < 1e-3 &&
+    Math.abs(cx[1] - (xs[xs.length - 1] + (plan.s.ribbonW + plan.s.slotClear) / 2 + plan.s.combEnd + BOX_WALL)) < 1e-3 &&
     Math.abs(cz[1] - cz[0] - sc.combs[1].depth) < 1e-3 && sc.combs[1].depth <= D + 1e-9 && Math.abs(cy[1] - cy[0] - 3) < 1e-3,
     `x ${num(cx[0], 1)}…${num(cx[1], 1)}, depth ${num(cz[1] - cz[0], 2)}, thick ${num(cy[1] - cy[0], 2)}`);
   check('slot outlines: 4 edges on each face of every slot', sc.lines.length === plan.rows.length * xs.length * 2 * 4 * 6);

@@ -84,7 +84,7 @@ export const DEFAULTS = {
   slotClear: 0.6,       // mm added to the slot's length and width
   minSlot: 1.0,         // mm, narrowest slot the laser should cut
   combMargin: 8,        // mm of comb in front of and behind each row's farthest-reaching slot
-  combEnd: 30,          // mm of comb beyond the outer ribbons
+  combEnd: 20,          // mm of comb beyond the outer ribbons' farthest slot ends (core/fab.js combEnds)
   bedMm: 600,           // mm, longest comb piece the cutter takes
   splitComb: false,     // cut every comb along its centre line for assembly
   minWeb: 2,            // mm of material between neighbouring slots
