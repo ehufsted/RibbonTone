@@ -149,6 +149,18 @@ function mul(a, b) {
   return o;
 }
 
+/**
+ * The orbit camera's frame. `right` stays horizontal and `up` follows from it,
+ * so the picture turns smoothly through looking straight down or up (a fixed
+ * world up would flip it there), and panning moves with the picture.
+ */
+export function camBasis(cam) {
+  const cp = Math.cos(cam.pitch), sp = Math.sin(cam.pitch), sy = Math.sin(cam.yaw), cy = Math.cos(cam.yaw);
+  const fwd = [-cp * sy, -sp, -cp * cy];
+  const right = [cy, 0, -sy];
+  return { fwd, right, up: cross(right, fwd) };
+}
+
 /** The orbit camera's eye: yaw 0, pitch 0 looks straight at the wall from the front. */
 export function eyeOf(cam) {
   const cp = Math.cos(cam.pitch);
@@ -267,6 +279,7 @@ export function createView3D(canvas) {
       gl.enableVertexAttribArray(depth.loc.aPos); gl.vertexAttribPointer(depth.loc.aPos, 3, gl.FLOAT, false, 0, 0);
       gl.drawArrays(gl.TRIANGLES, 0, bf.count);
     }
+    gl.disableVertexAttribArray(depth.loc.aPos);
     gl.bindFramebuffer(gl.FRAMEBUFFER, null);
     const texelWorld = Math.max(x1 - x0, y1 - y0) / SIZE;
     shadow = { mvp, texelWorld, depthRange: z1 - z0 + 2 * pad };
@@ -293,7 +306,7 @@ export function createView3D(canvas) {
     const b = scene.bounds;
     const reach = Math.hypot(b.x1 - b.x0, b.y1 - b.y0, b.z1 - b.z0);
     const near = Math.max(1, cam.dist - reach) * 0.5, far = cam.dist + reach * 2;
-    const up = Math.abs(cam.pitch) > 88 * RAD ? [0, 0, -1] : [0, 1, 0];
+    const up = camBasis(cam).up;
     const mvp = mul(perspective(cam.fov, canvas.width / canvas.height, near, far), lookAt(eye, cam.target, up));
 
     const shadowsOn = !!o.shadows && shadowOK;
@@ -337,6 +350,10 @@ export function createView3D(canvas) {
       gl.bindBuffer(gl.ARRAY_BUFFER, bf.nrm);
       gl.enableVertexAttribArray(L.aNrm); gl.vertexAttribPointer(L.aNrm, 3, gl.FLOAT, false, 0, 0);
       gl.drawArrays(gl.TRIANGLES, 0, bf.count);
+      // never leave an array enabled: another program's pass (or a deleted
+      // buffer after setScene) would trip over it, and some browsers then refuse every draw
+      gl.disableVertexAttribArray(L.aPos);
+      gl.disableVertexAttribArray(L.aNrm);
     };
     const clear = o.comb.look === 'clear';
     const CLEAR = { albedo: [0.82, 0.88, 0.92], sheen: 0.5, gloss: 60, alpha: 0.22 };
@@ -419,8 +436,7 @@ export function createView3D(canvas) {
       onChange(cam);
     }, { passive: false });
     const pan = (cam, dx, dy) => {
-      const eye = eyeOf(cam);
-      const f = norm(sub(cam.target, eye)), r = norm(cross(f, [0, 1, 0])), u = cross(r, f);
+      const { right: r, up: u } = camBasis(cam);
       const k = (2 * cam.dist * Math.tan(cam.fov / 2)) / canvas.clientHeight;
       for (let i = 0; i < 3; i++) cam.target[i] += (-dx * r[i] + dy * u[i]) * k;
     };
