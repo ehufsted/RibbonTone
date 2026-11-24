@@ -7,6 +7,9 @@
 //
 //     Y = c·F + (1 − c)·Ybg,      c = min(1, (w|cos(θ−α)| + t|sin(θ−α)|) / (p·cos α))
 //
+// where the backdrop's share is darkened by the ribbons' own shadows on it
+// (backdropLit, below): little on a black backdrop, a lot on a white one.
+//
 // α is the direction to the viewer from this ribbon (each ribbon sees the
 // viewer from a slightly different side), so the face is seen at θ − α, and the
 // pitch itself is foreshortened by cos α.
@@ -36,6 +39,7 @@
 // approximation for the others (their lighting differs slightly).
 
 import { toLinear } from './color.js';
+import { wallDepth } from './fab.js';
 
 const RAD = Math.PI / 180;
 export const LUT_STEP = 0.5;                 // degrees per LUT entry
@@ -77,7 +81,52 @@ export function pitchModel(th, al, s, ybg = backdropY(s)) {
     if (nh > 0) Fdir += s.sheen * Math.pow(nh, s.gloss);
   }
   const F = Famb + Fdir;
-  return { c, F, Famb, Fdir, Y: c * F + (1 - c) * ybg };
+  const lf = backdropLit(th, al, s, Lx, Lz);
+  const yb = lf * ybg + (1 - lf) * s.bgReflectance * s.ambient;
+  return { c, F, Famb, Fdir, Y: c * F + (1 - c) * yb, backLit: lf };
+}
+
+/**
+ * How far behind the ribbons' centre lines the backdrop is: the box's back
+ * wall, against the deepest comb (or, with pins, the stand-off past a ribbon
+ * turned end-on: fab.pinWallDepth). The deepest comb
+ * depends on the solved angles, so the pipeline solves once with the deepest
+ * a comb can be, then again with `backDepth`, the deepest that came out.
+ */
+export const backdropDistance = wallDepth;
+
+/**
+ * THE RIBBONS' SHADOWS ON THE BACKDROP. Locally every ribbon of a stretch has
+ * about the same angle, so on the backdrop (d behind the ribbons) the pattern
+ * repeats every pitch: each ribbon hides an interval from the viewer, V (its
+ * cross-section projected along the view, slope tan α), and shades an
+ * interval, S (projected along the light, slope Lx/Lz). Seen straight down
+ * the light, S hides behind V; from any other side it shows in the gap. The
+ * share of the visible gap that is still lit, on a circle one pitch round:
+ *
+ *     1 − |S ∩ gap| / |gap|,   |S ∩ gap| = |S| − |S ∩ V|
+ *
+ * Shadowed backdrop keeps only the ambient light. A light no higher than the
+ * vertical (Lz ≤ 0) leaves the backdrop unlit already (backdropY).
+ */
+export function backdropLit(th, al, s, Lx, Lz) {
+  if (!(Lz > 1e-6)) return 1;
+  const d = backdropDistance(s), p = s.pitch, hw = s.ribbonW / 2;
+  const c = Math.cos(th * RAD), sn = Math.sin(th * RAD);
+  // the two edges, (−hw·c, hw·s) and (hw·c, −hw·s), dropped onto the backdrop along slope t
+  const span = (t) => {
+    const u = -hw * c - (hw * sn + d) * t, v = hw * c - (-hw * sn + d) * t;
+    return u < v ? [u, v] : [v, u];
+  };
+  const V = span(Math.tan(al * RAD)), S = span(Lx / Lz);
+  const lenV = Math.min(p, V[1] - V[0]), gap = p - lenV;
+  if (gap <= 1e-9) return 1;
+  const lenS = S[1] - S[0];
+  if (lenS >= p) return 0;
+  let both = 0;
+  const k0 = Math.floor((S[0] - V[1]) / p), k1 = Math.ceil((S[1] - V[0]) / p);
+  for (let k = k0; k <= k1; k++) both += Math.max(0, Math.min(S[1], V[1] + k * p) - Math.max(S[0], V[0] + k * p));
+  return Math.max(0, Math.min(1, 1 - Math.max(0, lenS - both) / gap));
 }
 
 /**

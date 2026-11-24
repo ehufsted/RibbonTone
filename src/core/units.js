@@ -51,6 +51,7 @@ export const DEFAULTS = {
   pitch: 30,            // mm, centre to centre
   thickness: 0.25,      // mm
   material: 'satin',
+  darkRibbons: false,   // dark ribbons on a white backdrop: swaps the two reflectances
   reflectance: 0.85,
   sheen: 0.2,
   gloss: 10,
@@ -79,23 +80,35 @@ export const DEFAULTS = {
   minSpacing: 40,       // mm, least distance between brackets
   maxSpan: 400,         // mm, longest span between brackets
   diffusion: 0.6,       // share of each ribbon's tone error passed to the next
+  combShadows: false,   // model the shadows solid combs cast (core/combshade.js)
+  alignTwists: false,   // on: neighbours turn alike (alignment +1); off: opposite (−1). core/align.js
   // fabrication
   slotClear: 0.6,       // mm added to the slot's length and width
   minSlot: 1.0,         // mm, narrowest slot the laser should cut
-  combMargin: 8,        // mm of comb around the slots, front and back
-  combEnd: 30,          // mm of comb beyond the outer ribbons
-  holeDia: 5,           // mm, comb mounting holes
+  combMargin: 10,       // mm of comb in front of and behind each row's farthest-reaching slot (1 cm to the back wall)
+  combEnd: 10,          // mm of comb beyond the outer ribbons' farthest slot ends (core/fab.js combEnds): 1 cm to the sides
   bedMm: 600,           // mm, longest comb piece the cutter takes
   splitComb: false,     // cut every comb along its centre line for assembly
   minWeb: 2,            // mm of material between neighbouring slots
+  combThick: 3,         // mm, sheet the combs and pin tabs are cut from
+  standoff: 10,         // mm, pins: the least gap from a ribbon's edge to the back wall (fab.pinWallDepth)
+  clipWall: 1.5,        // mm, pins: clip material around the slot (core/fab.js clipShapes)
+  // the 3D view
+  box3d: true,          // the black box around the back, sides, top and bottom
+  combLook: 'solid',    // 'solid' | 'clear'
+  combColor: '#222222', // solid combs and tabs
+  shadows3d: true,      // cast shadows in the 3D view
 };
 
-/** The settings a material preset sets. */
-export const materialSettings = (id) => {
+/** A dyed-black ribbon's reflectance, for the dark scheme. */
+export const DARK_RIBBON = 0.05;
+
+/** The settings a material preset sets (a dyed-black ribbon in the dark scheme). */
+export const materialSettings = (id, dark = false) => {
   const m = MATERIALS[id];
   if (!m) return {};
   const { label, ...rest } = m;
-  return rest;
+  return dark ? { ...rest, reflectance: DARK_RIBBON } : rest;
 };
 
 /** The most ribbons, and samples down a ribbon, a plan may have. */

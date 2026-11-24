@@ -12,29 +12,37 @@
 // so every view is crisp at any zoom.
 
 import { DEFAULTS, MATERIALS, materialSettings, toMm, fromMm, pieceGeometry, toneLuminance, lenText } from './core/units.js';
-import { toEncoded } from './core/color.js';
+import { toEncoded, hexToLinear } from './core/color.js';
 import { quarterTurnLength, maxTwistDeg } from './core/twist.js';
 import { toneMap } from './core/target.js';
-import { backdropY, pitchModel } from './core/optics.js';
+import { backdropY, pitchModel, viewAngle } from './core/optics.js';
 import { ribbonSlices, paintOrder } from './core/render.js';
-import { planCombs, calibrationCombs, stackPieces, piecesSVG, piecesDXF, bracketCSV, wallTemplateSVG, mod180 } from './core/fab.js';
+import { planCombs, planDepth, sidePanelPiece, calibrationCombs, stackPieces, packPieces, pinClipPieces, backPanelPiece, piecesSVG, piecesDXF, bracketCSV, wallTemplateSVG, mod180 } from './core/fab.js';
 import { shrinkLinear, meanDeltaE, apparentPx, SCREEN_M } from './core/distance.js';
 import { projectJSON, parseProject } from './core/project.js';
 import { problemWith } from './pipeline.js';
 import { generateSample } from './app/samples.js';
+import { buildScene } from './core/scene.js';
+import { createView3D, preset } from './app/view3d.js';
 
 const $ = (id) => document.getElementById(id);
 const STORE = 'ribbontone.v1';
 
-const LEN = ['widthMm', 'heightMm', 'ribbonW', 'pitch', 'thickness', 'viewXMm', 'rowSpacing', 'minSpacing', 'maxSpan',
-  'slotClear', 'minSlot', 'combMargin', 'combEnd', 'holeDia', 'bedMm', 'minWeb'];
+const LEN = ['clipWall', 'widthMm', 'heightMm', 'ribbonW', 'pitch', 'thickness', 'viewXMm', 'rowSpacing', 'minSpacing', 'maxSpan',
+  'slotClear', 'minSlot', 'combMargin', 'combEnd', 'bedMm', 'minWeb', 'combThick', 'standoff'];
 const NUM = ['reflectance', 'sheen', 'gloss', 'strainPct', 'tensionN', 'density', 'G', 'E', 'bgReflectance', 'distM', 'maxRows', 'maxPerRibbon'];
 const RANGE = { gamma: (v) => v.toFixed(2), brightness: (v) => v.toFixed(2), contrast: (v) => v.toFixed(2),
   lightAz: (v) => `${v}°`, lightEl: (v) => `${v}°`, ambient: (v) => v.toFixed(2), diffusion: (v) => v.toFixed(2) };
-const CHECK = ['curveOn', 'splitComb'];
+const CHECK = ['curveOn', 'splitComb', 'box3d', 'shadows3d', 'alignTwists', 'combShadows'];
 const SELECT = ['material', 'layout'];
 /** Settings that only change the cutting files: no new solve. */
-const FAB_ONLY = new Set(['slotClear', 'minSlot', 'combMargin', 'combEnd', 'holeDia', 'bedMm', 'minWeb', 'splitComb']);
+// (not slotClear, minSlot, combMargin or standoff: they set the comb depths and so
+// how far the back wall is behind the ribbons, which the solver's backdrop shadows use)
+const FAB_ONLY = new Set(['combEnd', 'bedMm', 'minWeb', 'splitComb', 'combThick', 'clipWall']);
+/** Settings that only change how the 3D view looks. */
+const VIEW_ONLY = new Set(['box3d', 'combLook', 'combColor', 'shadows3d']);
+/** The default comb colour in the dark-ribbon scheme. */
+const LIGHT_COMB = '#e4e4e4';
 /** The material preset's settings: editing one makes the material "custom". */
 const MATERIAL_KEYS = Object.keys(materialSettings('satin'));
 
@@ -48,7 +56,11 @@ const state = {
   plan: null,
   slices: null,         // core/render.js, per view
   exposure: 1,          // relative Y shown as white (exposureOf)
+  scene: null,          // core/scene.js, built when the 3D view needs it
+  cam: null,            // the 3D view's orbit camera
   idealSlices: null,
+  walkDeg: 0,           // the viewer, turned this far about the piece's centre from the design viewpoint (Viewer slider)
+  walkSlices: new Map(), // core/render.js slices for a moved viewer, by view and position
   targetCanvas: null,
   jobId: 0,
   pending: false,
@@ -111,6 +123,8 @@ function onWorkerMessage(ev) {
     state.slices = ribbonSlices(msg.plan, 'th');
     state.exposure = exposureOf(msg.plan, state.slices);
     state.idealSlices = null;
+    state.walkSlices.clear();
+    state.scene = null;
     state.targetCanvas = null;
     setStatus(`ready · ${(msg.ms / 1000).toFixed(1)} s`);
     paint();
@@ -123,7 +137,7 @@ function run() {
   if (!state.rgba || !worker) return;
   updatePieceNote();
   const problem = problemWith(state.set);
-  if (problem) { setStatus(problem, 'bad'); return; }
+  if (problem) { updateNotes(); return; }   // the message, and no file written until it is fixed
   save();
   cancelInFlight();
   if (!worker) return;
@@ -154,6 +168,9 @@ function showFields() {
   $('material').value = MATERIALS[s.material] ? s.material : 'custom';
   $('layout').value = s.layout;
   $('curve').value = s.curve;
+  $('combLook').value = s.combLook;
+  $('darkRibbons').checked = !!s.darkRibbons;
+  $('combColor').value = s.combColor;
   for (const el of document.querySelectorAll('.u')) el.textContent = unitLabel();
   for (const b of document.querySelectorAll('#unitSeg button')) b.setAttribute('aria-pressed', String(b.dataset.units === s.units));
   for (const b of document.querySelectorAll('#holdSeg button')) b.setAttribute('aria-pressed', String(b.dataset.hold === s.hold));
@@ -162,7 +179,15 @@ function showFields() {
 
 function changed(id) {
   save();
-  if (FAB_ONLY.has(id)) { updateNotes(); return; }
+  // the comb look decides whether comb shadows are modelled, so with that on it re-solves
+  if (id === 'combLook') showLayout();
+  // the comb look and the sheet's thickness feed the comb-shadow model: with it on, they re-solve
+  const shading = state.set.combShadows && (id === 'combLook' || id === 'combThick');
+  if ((FAB_ONLY.has(id) || VIEW_ONLY.has(id)) && !shading) {
+    if (FAB_ONLY.has(id)) { updateNotes(); state.scene = null; }
+    if (state.view === 'view3d') paint();
+    return;
+  }
   scheduleRun();
 }
 
@@ -204,10 +229,19 @@ function bindFields() {
     '<option value="custom">Custom</option>';
   $('material').addEventListener('change', () => {
     s.material = $('material').value;
-    Object.assign(s, materialSettings(s.material));
+    Object.assign(s, materialSettings(s.material, s.darkRibbons));
     showFields();
     updatePieceNote();
     changed('material');
+  });
+  $('darkRibbons').addEventListener('change', () => {
+    // the scheme swaps the ribbon's and the backdrop's reflectance, and a
+    // default comb colour with them (dark combs vanish in a black box, light ones in a white one)
+    s.darkRibbons = $('darkRibbons').checked;
+    [s.reflectance, s.bgReflectance] = [s.bgReflectance, s.reflectance];
+    if (s.combColor === (s.darkRibbons ? DEFAULTS.combColor : LIGHT_COMB)) s.combColor = s.darkRibbons ? LIGHT_COMB : DEFAULTS.combColor;
+    showFields();
+    changed('darkRibbons');
   });
   $('layout').addEventListener('change', () => { s.layout = $('layout').value; showLayout(); changed('layout'); });
   let curveTimer = null;
@@ -235,6 +269,14 @@ function showLayout() {
   for (const el of document.querySelectorAll('[data-for]')) el.hidden = !el.dataset.for.split(' ').includes(layout);
   $('layoutBlurb').textContent = BLURBS[layout] + (s.hold === 'combs' ? ' Combs hold whole rows, so each ribbon\'s own heights need wall pins.' : '');
   $('curveBody').hidden = !s.curveOn;
+  $('standoffRow').hidden = s.hold !== 'pins';
+  // clear combs cast almost no shadow: nothing to model
+  const clear = s.combLook === 'clear';
+  $('combShadows').disabled = clear;
+  $('combShadowsLabel').style.opacity = clear ? 0.5 : '';
+  $('combShadowsLabel').title = clear ? 'clear combs (the 3D view\'s comb look) cast almost no shadow, so there is nothing to model'
+    : 'solid combs shade a band of ribbon and backdrop below them when lit from above: model it, so the solver turns ribbons to make up for it (and bunched rows avoid where it costs most)';
+  $('clipFab').hidden = s.hold !== 'pins';
   $('combFab').hidden = false;
 }
 
@@ -278,9 +320,9 @@ function sizeCanvas(W, H) {
  */
 const greyOf = (Y, exposure) => Math.round(255 * toEncoded(Y / exposure));
 
-/** The brightest face any ribbon can show at any angle (the model's, before shadows; or the slices', with a measured curve). */
+/** The brightest thing in view: the brightest face any ribbon can show (the model's, before shadows; or the slices', with a measured curve), or a white backdrop. */
 function exposureOf(plan, slices) {
-  let ex = 1e-6;
+  let ex = backdropY(plan.s);
   if (plan.curvePts) {
     for (const r of slices) for (const v of r.F) if (v > ex) ex = v;
     return ex;
@@ -300,6 +342,32 @@ function drawRibbons(ctx, plan, slices) {
   const ex = state.exposure;
   ctx.fillStyle = GREYS[greyOf(backdropY(plan.s), ex)];
   ctx.fillRect(0, 0, W, H);
+  const cb = slices.combBands;
+  if (cb && cb.length) {
+    // the combs' shadows on the backdrop, seen from the eye
+    const look = slices.combBandLook, Yb = (y) => look.ye + (y - look.ye) * look.k;
+    ctx.fillStyle = GREYS[greyOf(look.Y, ex)];
+    for (const [y0, y1] of cb) ctx.fillRect(0, Yb(y0), W, Yb(y1) - Yb(y0));
+  }
+  const sh = slices.shadow;
+  if (sh) {
+    // the ribbons' shadows on the backdrop, under everything else
+    ctx.save();
+    ctx.beginPath(); ctx.rect(0, 0, W, H); ctx.clip();
+    ctx.fillStyle = GREYS[greyOf(sh.Y, ex)];
+    const Ys = (y) => sh.ye + (y + sh.dy - sh.ye) * sh.k;
+    for (const { sl, sr } of slices) {
+      ctx.beginPath();
+      ctx.moveTo(sl[0], Ys(0));
+      for (let j = 0; j < n; j++) ctx.lineTo(sl[j], Ys((j + 0.5) * dy));
+      ctx.lineTo(sl[n - 1], Ys(H)); ctx.lineTo(sr[n - 1], Ys(H));
+      for (let j = n - 1; j >= 0; j--) ctx.lineTo(sr[j], Ys((j + 0.5) * dy));
+      ctx.lineTo(sr[0], Ys(0));
+      ctx.closePath();
+      ctx.fill();
+    }
+    ctx.restore();
+  }
   for (const i of paintOrder(plan)) {
     const { xl, xr, F } = slices[i];
     const grad = ctx.createLinearGradient(0, 0, 0, H);
@@ -396,6 +464,45 @@ function drawBrackets(ctx, plan, k) {
   }
 }
 
+/**
+ * Where the viewer stands: the design viewpoint turned `state.walkDeg` about
+ * the piece's centre, keeping its distance from the centre -- in the Distance
+ * view, the distance chosen there.
+ * @returns {{xv: number, distM: number}}  across the piece, mm; out from the wall, m
+ */
+function viewerAt(plan) {
+  const xc = plan.piece.W / 2, off = plan.xv - xc, dz = plan.s.distM * 1000;
+  const R = state.view === 'distance' ? parseFloat($('distView').value) * 1000 : Math.hypot(off, dz);
+  const phi = Math.atan2(off, dz) + (state.walkDeg * Math.PI) / 180;
+  return { xv: xc + R * Math.sin(phi), distM: (R * Math.cos(phi)) / 1000 };
+}
+
+/** The plan as the viewer (viewerAt) sees it: the same ribbons, each seen from its new direction. */
+function walked(plan) {
+  const v = viewerAt(plan);
+  if (Math.abs(v.xv - plan.xv) < 1e-6 && Math.abs(v.distM - plan.s.distM) < 1e-9) return plan;
+  return {
+    ...plan, xv: v.xv, s: { ...plan.s, distM: v.distM },
+    ribbons: plan.ribbons.map((r) => ({ ...r, alpha: viewAngle(r.x, v.xv, v.distM) })),
+  };
+}
+
+/** The slices for a view (the bracketed or the ideal path), from where the viewer stands. */
+function slicesFor(plan, which) {
+  const w = walked(plan);
+  if (w === plan) {
+    if (which === 'th') return state.slices;
+    state.idealSlices ||= ribbonSlices(plan, 'ideal');
+    return state.idealSlices;
+  }
+  const key = `${which}@${w.xv.toFixed(2)},${w.s.distM.toFixed(5)}`;
+  if (!state.walkSlices.has(key)) {
+    if (state.walkSlices.size > 8) state.walkSlices.clear();
+    state.walkSlices.set(key, ribbonSlices(w, which));
+  }
+  return state.walkSlices.get(key);
+}
+
 const HINTS = {
   preview: 'the ribbons from the design viewpoint, the brightest face shown as white',
   ideal: 'with a bracket everywhere: the best the twist limit allows; the gap to Preview is what the brackets cost',
@@ -407,18 +514,29 @@ const HINTS = {
 function paint() {
   const plan = state.plan;
   if (!plan) return;
+  const is3d = state.view === 'view3d';
   $('distControls').hidden = state.view !== 'distance';
+  $('walkCtl').hidden = !['preview', 'ideal', 'distance'].includes(state.view);
+  $('ctl3d').hidden = !is3d;
+  $('zoomCtl').hidden = is3d;
+  $('wrap').hidden = is3d;
+  $('view3d').hidden = !is3d;
+  $('stage').classList.toggle('is3d', is3d);
+  if (is3d) { paint3D(plan); return; }
   if (state.view === 'distance') { paintDistance(plan); return; }
   const k = sizeCanvas(plan.piece.W, plan.piece.H);
   const ctx = $('view').getContext('2d');
   ctx.setTransform(k, 0, 0, k, 0, 0);
   drawView(ctx, plan, state.view, k);
-  $('hint').textContent = HINTS[state.view] || '';
+  const shifted = state.walkDeg && (state.view === 'preview' || state.view === 'ideal');
+  $('hint').textContent = shifted
+    ? `as a viewer ${Math.abs(state.walkDeg)}° ${state.walkDeg > 0 ? 'right' : 'left'} of the design viewpoint sees it, at the same distance from the piece's centre (double-click the slider to go back)`
+    : HINTS[state.view] || '';
 }
 
 function drawView(ctx, plan, view, k) {
-  if (view === 'preview') drawRibbons(ctx, plan, state.slices);
-  else if (view === 'ideal') { state.idealSlices ||= ribbonSlices(plan, 'ideal'); drawRibbons(ctx, plan, state.idealSlices); }
+  if (view === 'preview') drawRibbons(ctx, walked(plan), slicesFor(plan, 'th'));
+  else if (view === 'ideal') drawRibbons(ctx, walked(plan), slicesFor(plan, 'ideal'));
   else if (view === 'target') drawTarget(ctx, plan);
   else if (view === 'diff') drawDiff(ctx, plan);
   else if (view === 'brackets') drawBrackets(ctx, plan, k);
@@ -433,9 +551,12 @@ function paintDistance(plan) {
   const D = parseFloat($('distView').value);
   $('distViewVal').textContent = `${D} m`;
   const { W, H } = plan.piece;
-  const tw = Math.max(8, Math.min(3000, Math.round(apparentPx(W, D))));
-  const th = Math.max(8, Math.round((tw * H) / W));
-  const k = Math.min(8, (4 * tw) / W, Math.sqrt(12e6 / (W * H)));
+  const full = Math.max(8, Math.min(3000, Math.round(apparentPx(W, D))));
+  const th = Math.max(8, Math.round((full * H) / W));
+  // seen from off to the side, the piece (and the image it stands for) looks narrower by cos φ
+  const v = viewerAt(plan), dz = v.distM * 1000;
+  const tw = Math.max(8, Math.round(full * (dz / Math.hypot(v.xv - W / 2, dz))));
+  const k = Math.min(8, (4 * full) / W, Math.sqrt(12e6 / (W * H)));
   const hw = Math.max(1, Math.round(W * k)), hh = Math.max(1, Math.round(H * k));
   const render = (view) => {
     const c = document.createElement('canvas');
@@ -467,7 +588,7 @@ function paintDistance(plan) {
   put(seen, 0);
   if (compare) put(tgt, tw + gap);
   const merge = (plan.s.pitch * SCREEN_M) / (25.4 / 96);
-  $('hint').textContent = `as seen from ${D} m, if you sit ${SCREEN_M} m from a 96 dpi screen${compare ? ' (the target on the right)' : ''}: ` +
+  $('hint').textContent = `as seen from ${D} m${state.walkDeg ? `, ${Math.abs(state.walkDeg)}° ${state.walkDeg > 0 ? 'right' : 'left'} of the design viewpoint` : ''}, if you sit ${SCREEN_M} m from a 96 dpi screen${compare ? ' (the target on the right)' : ''}: ` +
     `ΔE ${meanDeltaE(seen, tgt).toFixed(1)} pixel for pixel; ` +
     (D < merge ? `the ribbons still show as stripes (they merge from about ${Math.round(merge)} m)` : 'the ribbons have merged into tone');
 }
@@ -511,27 +632,109 @@ function updateStats() {
   setStat('statBrackets', plan.rows ? `${st.brackets} (${st.rows} rows)` : String(st.brackets));
   setStat('statTone', st.tone.toFixed(1), st.tone > 8 ? 'warn' : '');
   setStat('statSeen', `${st.seen.toFixed(1)} (${st.seenIdeal.toFixed(1)})`, st.seen > 5 ? 'warn' : '');
+  setStat('statOff', `${st.offAxis.stripes.toFixed(1)} / ${st.offAxis.tone.toFixed(1)}`);
   setStat('statRate', `${Math.round(st.rateUse * 100)}%`, st.rateUse > 1 + 1e-6 ? 'bad' : '');
 }
 
 
+
+// ------------------------------------------------------------------ 3D
+// The scene is rebuilt only when the plan or a fabrication setting changes;
+// the camera persists across plans (reset with the presets) and starts at the
+// three-quarter view.
+let v3 = undefined;
+
+function paint3D(plan) {
+  if (v3 === undefined) {
+    try { v3 = createView3D($('view3d')); } catch (err) { console.error(err); v3 = null; }
+    if (v3) v3.controls(() => state.cam, () => draw3D());
+  }
+  if (!v3) { $('hint').textContent = 'this browser has no WebGL, so there is no 3D view'; return; }
+  if (!state.scene) {
+    state.scene = buildScene(plan, { ...plan.s, ...fabSettings() });
+    v3.setScene(state.scene);
+  }
+  if (!state.cam) state.cam = camPreset('quarter');
+  draw3D();
+  // touch screens get their own words
+  $('hint').textContent = window.matchMedia && window.matchMedia('(pointer: coarse)').matches
+    ? 'drag to orbit · two fingers to pan and pinch to zoom'
+    : 'drag to orbit · right- or shift-drag to pan · wheel or pinch to zoom';
+}
+
+function camPreset(name) {
+  const plan = state.plan, c = $('view3d');
+  return preset(name, state.scene, { xv: plan.xv, H: plan.piece.H, distM: plan.s.distM }, (c.clientWidth || 4) / (c.clientHeight || 3));
+}
+
+function draw3D() {
+  const plan = state.plan, s = plan.s, v = state.set;
+  if (!v3 || !state.scene || !state.cam) return;
+  const RADN = Math.PI / 180, ce = Math.cos(s.lightEl * RADN);
+  v3.render(state.cam, {
+    light: [ce * Math.sin(s.lightAz * RADN), Math.sin(s.lightEl * RADN), ce * Math.cos(s.lightAz * RADN)],
+    ambient: s.ambient, exposure: state.exposure,
+    ribbon: { albedo: [s.reflectance, s.reflectance, s.reflectance], sheen: s.sheen, gloss: s.gloss },
+    box: { on: v.box3d, albedo: [s.bgReflectance, s.bgReflectance, s.bgReflectance] },
+    comb: { look: v.combLook, albedo: hexToLinear(v.combColor) },
+    background: [0.114, 0.122, 0.149],
+    shadows: v.shadows3d,
+  });
+}
 
 /** The plan's notes, plus the comb check (settings may have changed since the solve). */
 function updateNotes() {
   const plan = state.plan;
   const items = plan ? plan.notes.slice() : [];
   let combMsg = '';
-  if (plan && plan.rows) {
-    const c = planCombs({ ...plan, s: { ...plan.s, ...fabSettings() } });
-    combMsg = `${c.pieces.length} comb pieces · least web between slots ${lenTxt(c.web)}`;
-    if (c.web < state.set.minWeb) items.push(`neighbouring comb slots come ${lenTxt(c.web)} apart, under the least web (${lenTxt(state.set.minWeb)}): widen the pitch`);
-  } else if (plan) {
-    combMsg = 'each ribbon has its own heights: wall pins, no combs';
+  // a setting out of range (problemWith): no file is written until it is fixed
+  const bad = problemWith(state.set);
+  for (const id of EXPORT_IDS) $(id).disabled = !!bad;
+  if (bad) {
+    items.unshift(bad);
+    setStatus(bad, 'bad');
+    state.badShown = true;
+    $('combNote').textContent = '';
+    $('notes').innerHTML = items.map((t) => `<li>${escapeHtml(t)}</li>`).join('');
+    return;
+  }
+  if (state.badShown) {
+    // the setting is fixed: clear its message (a re-solve, if one is needed, says its own)
+    state.badShown = false;
+    if (!state.pending) setStatus('ready');
+  }
+  if (plan) {
+    const fp = { ...plan, s: { ...plan.s, ...fabSettings() } };
+    const c = planCombs(fp);
+    combMsg = `${c.pieces.length} comb pieces${plan.rows && plan.hold !== 'pins' ? '' : ' (the top and bottom bars)'} · ` +
+      `deepest ${lenTxt(planDepth(fp))} · least web ${lenTxt(c.web)}`;
+    const bed = state.set.bedMm;
+    if (bed > 0) {
+      const side = sidePanelPiece(fp), panels = [['side panel', side]];
+      if (plan.hold === 'pins') panels.push(['back panel', backPanelPiece(fp)]);
+      for (const [name, pc] of panels) {
+        if (Math.max(pc.w, pc.h) > bed) items.push(`the ${name} (${lenTxt(pc.w)} × ${lenTxt(pc.h)}) is longer than the cutter bed: cut it on a larger machine, or from board by hand`);
+      }
+    }
+    if (c.web < state.set.minWeb) {
+      items.push(`comb material comes down to ${lenTxt(c.web)} (between slots${state.set.splitComb ? ', or the split\'s cut and a slot' : ''}), under the least web (${lenTxt(state.set.minWeb)}): widen the pitch`);
+    }
+  }
+  if (plan && state.set.hold === 'pins') {
+    // a clip turned end-on reaches back past the ribbon's edge by the slot's clearance, the clip's wall
+    // and a little more at its corners; the stem needs some length beyond that
+    const st = state.set, slotW = Math.max(st.minSlot, st.thickness + st.slotClear);
+    const past = Math.hypot((st.ribbonW + st.slotClear) / 2 + st.clipWall, slotW / 2 + st.clipWall) - st.ribbonW / 2;
+    if (st.standoff < past + 2) items.push(`the pin stand-off (${lenTxt(st.standoff)}) leaves a clip turned end-on (it reaches ${lenTxt(past)} past the ribbon's edge) almost no stem: make it ${lenTxt(past + 10)} or more`);
   }
   $('combNote').textContent = combMsg;
   $('notes').innerHTML = items.map((t) => `<li>${escapeHtml(t)}</li>`).join('');
-  $('exportCombsSVG').disabled = $('exportCombsDXF').disabled = !(plan && plan.rows);
+  $('exportCombsSVG').disabled = $('exportCombsDXF').disabled = !plan;
 }
+
+/** Every button that writes a file. */
+const EXPORT_IDS = ['exportCombsSVG', 'exportCombsDXF', 'exportSideSVG', 'exportSideDXF', 'exportClipsSVG', 'exportClipsDXF',
+  'exportPanelSVG', 'exportPanelDXF', 'exportCSV', 'exportTemplate', 'exportJson', 'exportPng', 'calSVG', 'calDXF'];
 
 const fabSettings = () => Object.fromEntries([...FAB_ONLY].map((k) => [k, state.set[k]]));
 
@@ -552,8 +755,11 @@ function bindExports() {
     const plan = state.plan;
     return stackPieces(planCombs({ ...plan, s: { ...plan.s, ...fabSettings() } }).pieces);
   };
-  $('exportCombsSVG').addEventListener('click', () => { if (state.plan?.rows) downloadFile(piecesSVG(combSheet(), `${base()} combs`), `${base()}-combs.svg`, 'image/svg+xml'); });
-  $('exportCombsDXF').addEventListener('click', () => { if (state.plan?.rows) downloadFile(piecesDXF(combSheet()), `${base()}-combs.dxf`, 'application/dxf'); });
+  $('exportCombsSVG').addEventListener('click', () => { if (state.plan) downloadFile(piecesSVG(combSheet(), `${base()} combs`), `${base()}-combs.svg`, 'image/svg+xml'); });
+  $('exportCombsDXF').addEventListener('click', () => { if (state.plan) downloadFile(piecesDXF(combSheet()), `${base()}-combs.dxf`, 'application/dxf'); });
+  const sideSheet = () => stackPieces([sidePanelPiece({ ...state.plan, s: { ...state.plan.s, ...fabSettings() } })]);
+  $('exportSideSVG').addEventListener('click', () => { if (state.plan) downloadFile(piecesSVG(sideSheet(), `${base()} side panel`), `${base()}-side-panel.svg`, 'image/svg+xml'); });
+  $('exportSideDXF').addEventListener('click', () => { if (state.plan) downloadFile(piecesDXF(sideSheet()), `${base()}-side-panel.dxf`, 'application/dxf'); });
   $('exportCSV').addEventListener('click', () => { if (state.plan) downloadFile(bracketCSV(state.plan, state.set.units), `${base()}-brackets.csv`, 'text/csv'); });
   $('exportTemplate').addEventListener('click', () => { if (state.plan) downloadFile(wallTemplateSVG(state.plan), `${base()}-wall-template.svg`, 'image/svg+xml'); });
   $('exportJson').addEventListener('click', () => {
@@ -568,14 +774,26 @@ function bindExports() {
   });
   $('exportPng').addEventListener('click', () => {
     if (!state.plan) return;
+    if (state.view === 'view3d') { draw3D(); $('view3d').toBlob((b) => downloadFile(b, `${base()}-3d.png`, 'image/png')); return; }
+    // a Preview from a shifted viewer says so in its name
+    const where = state.walkDeg && state.view !== 'target' && state.view !== 'diff' && state.view !== 'brackets'
+      ? `-viewer${state.walkDeg > 0 ? '+' : '-'}${Math.abs(state.walkDeg)}deg` : '';
     const p = state.plan, k = 2400 / Math.max(p.piece.W, p.piece.H);
     const c = document.createElement('canvas');
     c.width = Math.round(p.piece.W * k); c.height = Math.round(p.piece.H * k);
     const g = c.getContext('2d');
     g.setTransform(k, 0, 0, k, 0, 0);
     drawView(g, p, state.view === 'distance' ? 'preview' : state.view, k);
-    c.toBlob((b) => downloadFile(b, `${base()}-${state.view}.png`, 'image/png'));
+    c.toBlob((b) => downloadFile(b, `${base()}-${state.view}${where}.png`, 'image/png'));
   });
+  const pinPlan = () => ({ ...state.plan, s: { ...state.plan.s, ...fabSettings() } });
+  const clipSheet = () => packPieces(pinClipPieces(pinPlan()), state.set.bedMm);
+  const panelSheet = () => stackPieces([backPanelPiece(pinPlan())]);
+  const hasClips = () => state.plan && state.plan.hold === 'pins' && state.plan.ribbons.some((r) => r.knots.length > 2);
+  $('exportClipsSVG').addEventListener('click', () => { if (hasClips()) downloadFile(piecesSVG(clipSheet(), `${base()} pin clips`), `${base()}-pin-clips.svg`, 'image/svg+xml'); });
+  $('exportClipsDXF').addEventListener('click', () => { if (hasClips()) downloadFile(piecesDXF(clipSheet()), `${base()}-pin-clips.dxf`, 'application/dxf'); });
+  $('exportPanelSVG').addEventListener('click', () => { if (hasClips()) downloadFile(piecesSVG(panelSheet(), `${base()} back panel`), `${base()}-back-panel.svg`, 'image/svg+xml'); });
+  $('exportPanelDXF').addEventListener('click', () => { if (hasClips()) downloadFile(piecesDXF(panelSheet()), `${base()}-back-panel.dxf`, 'application/dxf'); });
   const cal = () => stackPieces(calibrationCombs({ ...state.set }, parseFloat($('calStep').value)).pieces);
   $('calSVG').addEventListener('click', () => downloadFile(piecesSVG(cal(), 'RibbonTone calibration combs'), 'ribbontone-calibration-combs.svg', 'image/svg+xml'));
   $('calDXF').addEventListener('click', () => downloadFile(piecesDXF(cal()), 'ribbontone-calibration-combs.dxf', 'application/dxf'));
@@ -710,13 +928,34 @@ function bindViews() {
   let distTimer = null;
   $('distView').addEventListener('input', () => { $('distViewVal').textContent = `${$('distView').value} m`; clearTimeout(distTimer); distTimer = setTimeout(paint, 80); });
   $('distCompare').addEventListener('change', paint);
+  let walkTimer = null;
+  const showWalk = () => {
+    const v = state.walkDeg;
+    $('walkVal').textContent = v === 0 ? 'design' : `${v > 0 ? '+' : '−'}${Math.abs(v)}°`;
+  };
+  $('walkDeg').addEventListener('input', () => { state.walkDeg = parseFloat($('walkDeg').value) || 0; showWalk(); clearTimeout(walkTimer); walkTimer = setTimeout(paint, 60); });
+  $('walkDeg').addEventListener('dblclick', () => { $('walkDeg').value = 0; state.walkDeg = 0; showWalk(); paint(); });
+  showWalk();
   $('zoom').addEventListener('change', paint);
   let resizeTimer = null;
   window.addEventListener('resize', () => { clearTimeout(resizeTimer); resizeTimer = setTimeout(paint, 120); });
 }
 
+function bind3D() {
+  $('camPreset').addEventListener('change', () => {
+    const name = $('camPreset').value;
+    $('camPreset').value = '';
+    if (!name || !state.scene) return;
+    state.cam = camPreset(name);
+    draw3D();
+  });
+  $('combLook').addEventListener('change', () => { state.set.combLook = $('combLook').value; changed('combLook'); });
+  $('combColor').addEventListener('input', () => { state.set.combColor = $('combColor').value; changed('combColor'); });
+}
+
 function init() {
   restore();
+  bind3D();
   bindFields();
   showFields();
   bindProjects();

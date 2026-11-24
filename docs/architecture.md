@@ -29,6 +29,14 @@ pipeline directly.
    measured curve (`angle value` lines from the calibration combs) can replace it.
    Near edge-on an unlit face is darker than the backdrop, so the darkest angle
    comes a few degrees before 90°.
+   The backdrop's share is darkened by the ribbons' own shadows on it
+   (`backdropLit`): on the box's back wall (half a comb depth behind, or the pin
+   stand-off), each ribbon's cross-section dropped along the light is an
+   interval per pitch; the part of the visible gap it covers keeps only ambient
+   light. Negligible on black, large on white.
+   **Dark ribbons on a white backdrop** is the same model with the two
+   reflectances swapped (the toggle swaps them; material presets then give a
+   dyed-black ribbon, 0.05): face-on is now the darkest angle.
 5. **Reachable range**: the image is mapped, in lightness (∛Y), onto
    [max of the ribbons' minima, min of their maxima]; contrast stretches first.
 6. **Twist mechanics** (`core/twist.js`):
@@ -52,7 +60,28 @@ pipeline directly.
      the span's peak rate is within κmax. Twist directions fall out of it.
    Ribbons are solved left to right; each passes a share ("Spread error") of
    its vertically blurred lightness error to the next, which the eye mixes.
-8. **Stats**: tone error (lightness ×100, sample by sample) and "as seen"
+8. **Comb shadows** (optional, `combShadows`; `core/combshade.js`): a solid
+   comb lit from above shades what lies below it and behind its front edge.
+   At a sample Δy below a comb's underside the cut-off is zc = D/2 − Δy·Lz/Ly;
+   ribbon cross-section below zc loses its direct light, and the backdrop does
+   where zc reaches the back wall. The solver uses this model wherever a
+   shadow reaches (ideal path, angle DP, and in bunched placement each
+   candidate span's own comb); everywhere else the LUT. Each comb's own depth
+   comes from a first solve, so this always runs two. Measured on a flat grey
+   (tests/core.combshade.js): blended error 2.12 → 0.75 and squared error
+   lower; per-sample absolute error can rise, because the twist limit spreads a
+   band's shortfall over its span. Not with a measured curve. The Preview draws
+   the shading; the 3D view shows the real shadows either way.
+9. **Twist directions** (`core/align.js`): during the solve, each ribbon's
+   ideal path and angle DP carry a small cost (`solve.alignCost`, ALIGN_K per
+   sample) for turning differently from (Align twists on, +1) or alike to
+   (off, −1) the ribbon on its left. After it, each ribbon is kept or mirrored whole about
+   the direction to the viewer (θ → 2α − θ: same look from the design
+   viewpoint, same brackets, same rate), chosen exactly over the row. Measured
+   on a viewer 1 m to either side (`offAxisDistortion`): on gives the fewest
+   stripes and a steadier blend than no preference; off the steadiest blend
+   but the most stripes. The Preview's Viewer slider shows any sideways position.
+10. **Stats**: tone error (lightness ×100, sample by sample) and "as seen"
    (after mixing neighbours 1:2:1 and a pitch down the ribbon), with the ideal
    path's for comparison; brackets; the worst span's peak rate and coil ratio.
 
@@ -64,9 +93,58 @@ pipeline directly.
   farthest from the viewer first; the brightest face is white.
 - Fabrication (`core/fab.js`): comb rows (slots along (cos θ, −sin θ) seen from
   above, FRONT at the viewer's edge, split at midpoints between ribbons to fit
-  the cutter bed, optional centre split), the bracket list CSV (slot angle and
+  the cutter bed). Each comb is as deep as its own row needs (`rowDepth`: the
+  farthest-reaching slot plus the margin front and back), centred on the
+  ribbons' line; the box is as deep as the deepest, so the pipeline solves
+  once with the deepest possible comb and again with the deepest that came out
+  (the backdrop shadows depend on it). Comb ends carry tabs into slots in the
+  side panels (`sidePanelPiece`, cut two). The optional split is a zigzag
+  (`combLayout`): along each slot, peaks between ribbons (the back half gets a
+  V at each ribbon); where a straight leg would cut back through a steep slot
+  it first runs straight out of the slot's end (a dogleg, at least the least
+  web long). With pins, the top and bottom bars are combs too. the bracket list CSV (slot angle and
   signed turn since the bracket above), a 1:1 wall template, the calibration
   combs. SVG and DXF (R12, y flipped) from the same shapes.
+
+## 3D view
+
+`core/scene.js` builds the geometry (DOM-free, tested); `app/view3d.js` draws it
+with hand-written WebGL. World space: x as on the piece, y up, z toward the
+viewer, ribbons' centre lines at z = 0.
+
+- Ribbons: strips cut at every bracket and about every 2° of turn, with the
+  cross-section `render.js` projects.
+- Combs: solid prisms (comb length × comb depth × sheet thickness) that the
+  ribbons simply pass through; the depth buffer hides the part inside, which
+  reads as a slot. Slot outlines are drawn on both faces. Solid (any colour) or
+  clear acrylic (blended, no depth write, farthest first, back faces then front:
+  so prism triangles must wind counter-clockwise from outside, which a test checks).
+- Pins: the top and bottom bars stay combs; every bracket between them is a
+  pin clip (`fab.clipShapes`): a flat T cut from the comb sheet. The crossbar
+  is the slot plus `clipWall` all round, turned to the ribbon's angle; the stem
+  (80 % of the clip's width) runs straight back to the wall and on through the
+  back panel as a tab. The stem's end is cut parallel to whichever face of the
+  clip it meets, half a clip wall short of the slot, so a straight line always
+  separates stem and slot (a square end clipped the slot's corner on tilted
+  clips). The cut path is the union of the two convex shapes (Weiler–Atherton);
+  the harness checks every whole degree. Cut files: the clips packed across the
+  cutter bed, labelled ribbon.bracket along the stem, and the back panel with a
+  slot for each stem.
+- Box: back, sides, top and bottom, open at the front. Its depth is the combs';
+  the combs mount to its sides; with pins the back wall is the stand-off past
+  a ribbon turned end-on (w/2 + stand-off behind the centre line).
+- Shading is the optics model (Lambert + sheen, same light, same exposure), so
+  the design-viewpoint preset matches the 2D Preview.
+- Shadows: a shadow map (RGBA-packed depth, WebGL 1), orthographic from the
+  light over the scene's bounds, 3 × 3 samples, a normal offset of 1.5 texels
+  so the thin ribbons do not shadow themselves. Only direct light and sheen are
+  shadowed. Redrawn when the scene, light or casters change, not per frame.
+  Clear combs cast none.
+- What the 3D view shows that the solver does not model: the COMBS' shadows. A
+  solid comb, lit from above, shades a band of ribbon and backdrop below it
+  (about (D/2 − z)·Ly/Lz deep). Clear combs avoid most of it.
+- A WebGL canvas cannot be a 2D canvas too, so the 3D view has its own canvas.
+  Headless checks need `--use-angle=swiftshader --enable-unsafe-swiftshader`.
 
 ## Verification
 
@@ -80,3 +158,5 @@ angle agreement), projects, and the pipeline's limits and layouts.
 Heat-set jigs, 3D-printed ribbons (a continuous-profile mode: the ideal path is
 already it), plastically twisted metal strips, several viewpoints at once,
 colour, a photo reader for the calibration curve, shadows across slices.
+3D view: hover picking, a walk-by slider, an assembly
+slider, a section plane, OBJ export, cutting files for the pin tabs.

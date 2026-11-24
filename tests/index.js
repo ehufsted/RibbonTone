@@ -9,6 +9,9 @@ import * as solve from './core.solve.js';
 import * as render from './core.render.js';
 import * as fab from './core.fab.js';
 import * as project from './core.project.js';
+import * as scene from './core.scene.js';
+import * as align from './core.align.js';
+import * as combshade from './core.combshade.js';
 import * as pipeline from './pipeline.js';
 
 export const SECTIONS = [
@@ -19,6 +22,9 @@ export const SECTIONS = [
   ['core.render', render],
   ['core.fab', fab],
   ['core.project', project],
+  ['core.scene', scene],
+  ['core.align', align],
+  ['core.combshade', combshade],
   ['pipeline', pipeline],
 ];
 

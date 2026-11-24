@@ -31,4 +31,11 @@ export function run() {
   check('ray–segment test: a ray along +x hits a vertical segment ahead, not one behind', rayHits(0, 0, 1, 0, 5, -1, 5, 1) && !rayHits(0, 0, 1, 0, -5, -1, -5, 1));
   const order = paintOrder(fakePlan(s, [0, 30, 60, 90, 120], [0, 0, 0, 0, 0], 60));
   check('painting order ends with the ribbon nearest the viewer\'s line', order[order.length - 1] === 2, order.join(','));
+
+  const lit45 = { ...plain, lightAz: 0, lightEl: 45, distM: 1000, slotClear: 0.6, combMargin: 8 };
+  const sh = ribbonSlices({ ...fakePlan(lit45, [100], [0], 100), piece: { H: 600 } }, 'th');
+  check('backdrop shadow: face-on under a front light, as wide as the ribbon, dropped d·tan 45° = 18.3 mm',
+    sh.shadow && Math.abs(sh[0].sr[0] - sh[0].sl[0] - 20) < 0.05 && Math.abs(sh.shadow.dy - 18.3) < 1e-9, sh.shadow && `width ${num(sh[0].sr[0] - sh[0].sl[0], 3)}, drop ${num(sh.shadow.dy, 3)}`);
+  const noSh = ribbonSlices({ ...fakePlan({ ...lit45, lightEl: 90 }, [100], [0], 100), piece: { H: 600 } }, 'th');
+  check('a light straight overhead leaves no shadow on the backdrop', noSh.shadow === null);
 }
