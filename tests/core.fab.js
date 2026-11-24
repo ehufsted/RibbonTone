@@ -142,6 +142,9 @@ export function run() {
   check('every angle: the stem stays at least half a clip wall (0.75 mm) from the slot', worst >= 0.75 - 1e-6, `least ${num(worst, 3)} mm`);
   check('every angle: one simple outline, bigger than the bar and smaller than bar + stem', single && areaOK);
   check('every angle: the stem reaches through the back panel', toWall);
+  const deep = clipShapes(90, { ...ps, standoff: 0, clipWall: 40 });
+  check('a clip so deep it reaches the back wall: its bar alone, no NaN', deep.stem.length === 0 && deep.outline.length === 4 && deep.outline.flat().every(Number.isFinite));
+  check('union with an empty polygon is the other one; two empties, none', unionConvex([[0, 0], [1, 0], [1, 1]], []).length === 3 && unionConvex([], []) === null);
   const sq = [[0, 0], [2, 0], [2, 2], [0, 2]], sq2 = [[1, 1], [3, 1], [3, 3], [1, 3]];
   check('union of two overlapping 2×2 squares: area 7', Math.abs(polyArea(unionConvex(sq, sq2)) - 7) < 1e-9, num(polyArea(unionConvex(sq, sq2)), 4));
   check('union of disjoint squares: none', unionConvex(sq, [[5, 5], [6, 5], [6, 6], [5, 6]]) === null);

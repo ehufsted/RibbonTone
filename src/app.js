@@ -137,7 +137,7 @@ function run() {
   if (!state.rgba || !worker) return;
   updatePieceNote();
   const problem = problemWith(state.set);
-  if (problem) { setStatus(problem, 'bad'); return; }
+  if (problem) { updateNotes(); return; }   // the message, and no file written until it is fixed
   save();
   cancelInFlight();
   if (!worker) return;
@@ -650,6 +650,22 @@ function updateNotes() {
   const plan = state.plan;
   const items = plan ? plan.notes.slice() : [];
   let combMsg = '';
+  // a setting out of range (problemWith): no file is written until it is fixed
+  const bad = problemWith(state.set);
+  for (const id of EXPORT_IDS) $(id).disabled = !!bad;
+  if (bad) {
+    items.unshift(bad);
+    setStatus(bad, 'bad');
+    state.badShown = true;
+    $('combNote').textContent = '';
+    $('notes').innerHTML = items.map((t) => `<li>${escapeHtml(t)}</li>`).join('');
+    return;
+  }
+  if (state.badShown) {
+    // the setting is fixed: clear its message (a re-solve, if one is needed, says its own)
+    state.badShown = false;
+    if (!state.pending) setStatus('ready');
+  }
   if (plan) {
     const fp = { ...plan, s: { ...plan.s, ...fabSettings() } };
     const c = planCombs(fp);
@@ -670,6 +686,10 @@ function updateNotes() {
   $('notes').innerHTML = items.map((t) => `<li>${escapeHtml(t)}</li>`).join('');
   $('exportCombsSVG').disabled = $('exportCombsDXF').disabled = !plan;
 }
+
+/** Every button that writes a file. */
+const EXPORT_IDS = ['exportCombsSVG', 'exportCombsDXF', 'exportSideSVG', 'exportSideDXF', 'exportClipsSVG', 'exportClipsDXF',
+  'exportPanelSVG', 'exportPanelDXF', 'exportCSV', 'exportTemplate', 'exportJson', 'exportPng', 'calSVG', 'calDXF'];
 
 const fabSettings = () => Object.fromEntries([...FAB_ONLY].map((k) => [k, state.set[k]]));
 
@@ -710,13 +730,16 @@ function bindExports() {
   $('exportPng').addEventListener('click', () => {
     if (!state.plan) return;
     if (state.view === 'view3d') { draw3D(); $('view3d').toBlob((b) => downloadFile(b, `${base()}-3d.png`, 'image/png')); return; }
+    // a Preview from a shifted viewer says so in its name
+    const where = state.walk && state.view !== 'target' && state.view !== 'diff' && state.view !== 'brackets'
+      ? `-viewer${state.walk > 0 ? '+' : '-'}${Math.round(Math.abs(state.walk))}mm` : '';
     const p = state.plan, k = 2400 / Math.max(p.piece.W, p.piece.H);
     const c = document.createElement('canvas');
     c.width = Math.round(p.piece.W * k); c.height = Math.round(p.piece.H * k);
     const g = c.getContext('2d');
     g.setTransform(k, 0, 0, k, 0, 0);
     drawView(g, p, state.view === 'distance' ? 'preview' : state.view, k);
-    c.toBlob((b) => downloadFile(b, `${base()}-${state.view}.png`, 'image/png'));
+    c.toBlob((b) => downloadFile(b, `${base()}-${state.view}${where}.png`, 'image/png'));
   });
   const pinPlan = () => ({ ...state.plan, s: { ...state.plan.s, ...fabSettings() } });
   const clipSheet = () => packPieces(pinClipPieces(pinPlan()), state.set.bedMm);

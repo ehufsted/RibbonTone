@@ -1,5 +1,5 @@
 import { section, check, num, plain, flatRGBA, vRamp, makeRGBA } from './runner.js';
-import { runPipeline } from '../src/pipeline.js';
+import { runPipeline, problemWith } from '../src/pipeline.js';
 import { planDepth, combDepth } from '../src/core/fab.js';
 
 const mod180 = (a) => ((a % 180) + 180) % 180;
@@ -65,6 +65,29 @@ export function run() {
   const msg = (over) => { try { runPipeline(detail, { ...plain, ...over }); return ''; } catch (e) { return e.message; } };
   check('row spacing 0: a message, not "Invalid array length"', /row spacing/.test(msg({ rowSpacing: 0 })), msg({ rowSpacing: 0 }));
   check('pitch 0: a message', /pitch/.test(msg({ pitch: 0 })), msg({ pitch: 0 }));
+
+  section('pipeline: zero and negative inputs', 'Every number a person can type has a range (problemWith): values that would ' +
+    'hang the solver, write NaN into a file, or quietly cut nonsense are refused with a message.');
+  const why = (over) => problemWith({ ...plain, ...over });
+  const refused = [
+    ['comb margin 0', { combMargin: 0 }], ['comb margin −5', { combMargin: -5 }], ['comb ends −1', { combEnd: -1 }],
+    ['clip wall 0', { clipWall: 0 }], ['least web 0', { minWeb: 0 }], ['slot clearance −0.5', { slotClear: -0.5 }],
+    ['least slot width −1', { minSlot: -1 }], ['stand-off −5', { standoff: -5 }], ['sheet thickness 0', { combThick: 0 }],
+    ['sheen tightness 0', { gloss: 0 }], ['sheen tightness −3', { gloss: -3 }], ['sheen −0.1', { sheen: -0.1 }],
+    ['bending modulus 0', { E: 0 }], ['shear modulus −1', { G: -1 }], ['areal density −10', { density: -10 }],
+    ['reflectance 1.2', { reflectance: 1.2 }], ['backdrop −0.1', { bgReflectance: -0.1 }], ['viewing distance 0.01 m', { distM: 0.01 }],
+    ['row spacing 0.01 (even rows)', { layout: 'even', rowSpacing: 0.01 }],
+  ];
+  const missed = refused.filter(([, o]) => !why(o));
+  check(`refused with a message: ${refused.map(([l]) => l).join(', ')}`, missed.length === 0, missed.map(([l]) => l).join(', ') || 'all refused');
+  const fine = [['comb ends 0', { combEnd: 0 }], ['stand-off 0', { standoff: 0 }], ['slot clearance 0', { slotClear: 0 }], ['least slot width 0', { minSlot: 0 }],
+    ['shear modulus 0', { G: 0 }], ['areal density 0', { density: 0 }], ['cutter bed 0', { bedMm: 0 }], ['cutter bed −1', { bedMm: -1 }]];
+  const wrongly = fine.filter(([, o]) => why(o));
+  check(`allowed: ${fine.map(([l]) => l).join(', ')}`, wrongly.length === 0, wrongly.map(([l, o]) => `${l}: ${why(o)}`).join('; ') || 'all allowed');
+  const err = (over, img = flatRGBA(40, 80, 128)) => { try { runPipeline(img, { ...plain, ...over }); return ''; } catch (e) { return e.message; } };
+  check('a piece 10 mm tall is refused (a sliver once made the solver ask for 173 MB)', /at least/.test(err({ heightMm: 10 })), err({ heightMm: 10 }));
+  check('even rows 5 mm apart down a 3 m piece: refused as too many rows, not 600 combs', /rows/.test(err({ heightMm: 3000, layout: 'even', rowSpacing: 5 })),
+    err({ heightMm: 3000, layout: 'even', rowSpacing: 5 }));
 
   section('pipeline: dark ribbons on white', 'The same solver with the reflectances swapped: now a dark part of the image wants a ' +
     'ribbon face-on and a light part wants it edge-on, the reverse of white on black.');

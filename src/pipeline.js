@@ -26,7 +26,13 @@ import { sampleColumns, reachRange, toneMap } from './core/target.js';
 import { twistModel, maxTwistDeg, quarterTurnLength } from './core/twist.js';
 import { idealPath, sampleFrame, knotGrid, spanCosts, placeKnots, solveAngles, pathFromKnots, pathLightness, blur1 } from './core/solve.js';
 
-/** Validation the app also uses, so it can say what is wrong before running. */
+/**
+ * Validation the app also uses, so it can say what is wrong before running --
+ * or before writing a cutting file, for the settings that only change those.
+ * Every number a person can type has its range here: zero and negative
+ * values that would hang the solver, write NaN into a file, or quietly cut
+ * nonsense get a message instead.
+ */
 export function problemWith(s) {
   if (!(s.widthMm > 0)) return 'enter a width';
   if (!(s.heightMm >= 0)) return 'height must be 0 (from the image) or more';
@@ -35,12 +41,29 @@ export function problemWith(s) {
   if (s.ribbonW > s.widthMm) return 'the ribbon is wider than the piece';
   if (!(s.strainPct > 0)) return 'the edge strain limit must be more than 0';
   if (!(s.tensionN > 0)) return 'the bottom bar must pull: tension must be more than 0';
-  if (!(s.distM > 0)) return 'the viewing distance must be more than 0';
+  if (!(s.distM >= 0.3)) return 'the viewing distance must be at least 0.3 m';
+  if (!(s.reflectance >= 0 && s.reflectance <= 1) || !(s.bgReflectance >= 0 && s.bgReflectance <= 1)) return 'reflectances run from 0 to 1';
+  if (!(s.sheen >= 0)) return 'the sheen cannot be negative';
+  if (!(s.gloss >= 1)) return 'the sheen tightness must be at least 1';
+  if (!(s.density >= 0) || !(s.G >= 0)) return 'areal density and shear modulus cannot be negative';
+  if (!(s.E > 0)) return 'the bending modulus must be more than 0';
   if (!(s.minSpacing > 0) || !(s.maxSpan >= s.minSpacing)) return 'brackets: the longest span must be at least the least spacing';
-  if (s.layout === 'even' && !(s.rowSpacing > 0)) return 'the row spacing must be more than 0';
+  if (s.layout === 'even' && !(s.rowSpacing >= 5)) return 'the row spacing must be at least 5 mm';
   if (!(s.maxRows >= 0) || !(s.maxPerRibbon >= 0)) return 'the most rows and most brackets per ribbon cannot be negative';
+  // the cutting files
+  if (!(s.slotClear >= 0) || !(s.minSlot >= 0)) return 'slot clearance and least slot width cannot be negative';
+  if (!(s.combMargin > 0)) return 'the comb margin must be more than 0, or the deepest slot cuts the comb in two';
+  if (!(s.combEnd >= 0)) return 'the comb ends cannot be negative';
+  if (!(s.minWeb > 0)) return 'the least web must be more than 0';
+  if (!(s.combThick > 0)) return 'the sheet thickness must be more than 0';
+  if (!(s.clipWall > 0)) return 'the clip wall must be more than 0';
+  if (!(s.standoff >= 0)) return 'the pin stand-off cannot be negative';
   return '';
 }
+
+/** The shortest piece, and the most even rows, a plan may have. */
+export const MIN_HEIGHT = 50;
+export const MAX_EVEN_ROWS = 400;
 
 /**
  * @param {{width,height,data}} rgba
@@ -83,6 +106,7 @@ function solveOnce(rgba, settings, opts = {}) {
     err.code = 'TOO_MANY';
     throw err;
   }
+  if (!(H >= MIN_HEIGHT)) throw new Error(`the piece is ${lenText(H, s.units)} tall: it must be at least ${lenText(MIN_HEIGHT, s.units)}`);
   const n = Math.min(MAX_SAMPLES, Math.max(24, Math.round(H / 2)));
   const dy = H / n;
   const cols = sampleColumns(lum, geo, s.pitch, n);
@@ -122,6 +146,7 @@ function solveOnce(rgba, settings, opts = {}) {
   let rows = null;
   if (layout === 'even') {
     const spans = Math.max(1, Math.round(H / s.rowSpacing));
+    if (spans > MAX_EVEN_ROWS) throw new Error(`a row spacing of ${len(s.rowSpacing)} gives ${spans} rows: widen it (at most ${MAX_EVEN_ROWS} rows)`);
     rows = Array.from({ length: spans + 1 }, (_, k) => (k * H) / spans);
     if (H / spans < s.minSpacing) notes.push(`even rows are ${len(H / spans)} apart, closer than the least spacing (${len(s.minSpacing)})`);
   } else if (layout === 'bunched') {
@@ -149,7 +174,10 @@ function solveOnce(rgba, settings, opts = {}) {
     // with alignment, every ribbon leans toward (or away from) the one on its left
     const al = s.align && i > 0 ? { prev: ribbons[i - 1].th, alignK: s.align * ALIGN_K } : {};
     let ys = rows, guide = ideal[i];
-    // (shared rows keep the plain ideal path as the angle search's centre, as without alignment)
+    // the angle search centres on the ideal path; it is solved again for this ribbon
+    // when it leans on its left neighbour (alignment, always with the toggle), or
+    // takes spread error with its own bracket heights; shared rows without
+    // alignment keep the plain one
     if ((carry && !rows) || al.prev) guide = idealPath(Llut[i], LtEff, dy, kmaxDeg, al);
     if (!ys) {
       const pk = placeKnots(spanCosts(frame, Llut[i], LtEff, guide, kmaxDeg, grid), grid, Math.max(0, Math.round(s.maxPerRibbon)));

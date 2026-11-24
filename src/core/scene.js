@@ -180,7 +180,7 @@ export function buildScene(plan, s) {
         const kn = r.knots[b], yw = Y(kn.y), sh = clipShapes(kn.a, sw);
         const at = (P) => P.map(([x, z]) => [r.x + x, z]);
         addPrism(clips, at(sh.bar), yw - t / 2, yw + t / 2);
-        addPrism(clips, at(sh.stem), yw - t / 2, yw + t / 2);
+        if (sh.stem.length >= 3) addPrism(clips, at(sh.stem), yw - t / 2, yw + t / 2);
         slotLines(r.x, yw, kn.a);
       }
     }

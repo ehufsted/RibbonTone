@@ -70,6 +70,8 @@ export function idealPath(Llut, Lt, dy, kmaxDeg, opts = {}) {
   const n = Lt.length;
   const stepMax = kmaxDeg * dy;                      // degrees one sample may turn
   const M = Math.ceil(180 / Math.min(1, stepMax));
+  // a backstop: the pipeline keeps pieces tall enough that this never trips
+  if (!(M <= 7200)) throw new Error('the samples are too close together to solve (the piece is too short)');
   const r = 180 / M;
   const mMax = Math.max(1, Math.floor(stepMax / r + 1e-9));
   const Ls = new Float64Array(M);

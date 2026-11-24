@@ -409,7 +409,9 @@ export function clipShapes(th, s) {
   stem = clipHalfPlane(stem, ([x, z]) => nx * x + nz * z - keep);
   stem = orient(stem);
   const join = Math.max(...stem.map((q) => q[1]));
-  const outline = unionConvex(bar, stem) || bar;
+  // a clip so deep it reaches the wall has no stem left: the bar alone, never an empty outline
+  if (stem.length < 3) stem = [];
+  const outline = stem.length ? unionConvex(bar, stem) || bar : bar;
   return { bar, slot, stem, outline, reach, stemW, join };
 }
 
@@ -433,6 +435,7 @@ function orient(P) { return polyArea(P) < 0 ? P.slice().reverse() : P; }
  * null when they do not touch.
  */
 export function unionConvex(A, B) {
+  if (!(A.length >= 3) || !(B.length >= 3)) return A.length >= 3 ? A : B.length >= 3 ? B : null;
   const inside = (P, [x, y]) => P.every(([ax, ay], i) => { const [bx, by] = P[(i + 1) % P.length]; return (bx - ax) * (y - ay) - (by - ay) * (x - ax) > 1e-9; });
   const hits = [];
   A.forEach((a0, i) => {
@@ -458,7 +461,7 @@ export function unionConvex(A, B) {
   };
   const LA = augment(A, 'i', 't'), LB = augment(B, 'j', 'u');
   const start = LA.findIndex((n) => n.id === undefined && !inside(B, n.p));
-  if (start < 0) return B;
+  if (start < 0) return B.length >= 3 ? B : null;
   const out = [];
   let list = LA, other = LB, k = start;
   for (let guard = 0; guard < 4 * (LA.length + LB.length); guard++) {
@@ -471,7 +474,7 @@ export function unionConvex(A, B) {
       k = (m + 1) % list.length;
     } else k = (k + 1) % list.length;
   }
-  return out;
+  return out.length >= 3 ? out : null;
 }
 
 /** Every pin clip of a plan, one piece each, the wall at the top. */
