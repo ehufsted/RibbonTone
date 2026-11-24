@@ -39,7 +39,10 @@ export function run() {
     'eye blends them -- the steadiest blended tone -- but is the most stripes up close.');
   const img = makeRGBA(60, 60, (x, y) => { const r = Math.hypot(x - 30, y - 30); const v = Math.round(128 + 110 * Math.cos(r / 4)); return [v, v, v]; });
   const base = { ...plain, widthMm: 600, heightMm: 600, distM: 3, lightAz: 0, lightEl: 30, ambient: 0.3, sheen: 0.1, layout: 'even', rowSpacing: 100 };
-  const pos = runPipeline(img, { ...base, align: 1 }), off = runPipeline(img, { ...base, align: 0 }), neg = runPipeline(img, { ...base, align: -1 });
+  // the toggle: on is +1, off −1 (no `align` given); 0 only through the harness
+  const { align: _drop, ...noAlign } = base;
+  const pos = runPipeline(img, { ...noAlign, alignTwists: true }), off = runPipeline(img, { ...base, align: 0 }), neg = runPipeline(img, { ...noAlign, alignTwists: false });
+  check('the toggle sets the weight: on +1, off −1', pos.s.align === 1 && neg.s.align === -1);
   const o = (p) => p.stats.offAxis;
   check('stripes: aligned (+1) fewest, opposed (−1) most', o(pos).stripes <= o(off).stripes + 1e-9 && o(off).stripes <= o(neg).stripes + 1e-9,
     `+1 ${num(o(pos).stripes, 2)} · 0 ${num(o(off).stripes, 2)} · −1 ${num(o(neg).stripes, 2)}`);

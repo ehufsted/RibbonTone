@@ -80,7 +80,7 @@ export const DEFAULTS = {
   minSpacing: 40,       // mm, least distance between brackets
   maxSpan: 400,         // mm, longest span between brackets
   diffusion: 0.6,       // share of each ribbon's tone error passed to the next
-  align: 0.5,           // twist alignment, −1 … 1: mirror ribbons to match neighbours (+) or oppose them (−); core/align.js
+  alignTwists: false,   // on: neighbours turn alike (alignment +1); off: opposite (−1). core/align.js
   // fabrication
   slotClear: 0.6,       // mm added to the slot's length and width
   minSlot: 1.0,         // mm, narrowest slot the laser should cut

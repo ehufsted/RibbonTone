@@ -65,6 +65,8 @@ export function runPipeline(rgba, settings, opts = {}) {
 
 function solveOnce(rgba, settings, opts = {}) {
   const s = { ...DEFAULTS, ...settings };
+  // the alignment weight: the toggle's ±1 (the harness may set `align` itself, 0 for none)
+  if (!(typeof s.align === 'number')) s.align = s.alignTwists ? 1 : -1;
   const progress = opts.onProgress || (() => {});
   const bad = problemWith(s);
   if (bad) throw new Error(bad);

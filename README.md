@@ -35,12 +35,12 @@ or Edge), or open http://localhost:8080/verify.html.
 ## Twist directions
 
 A ribbon can turn either way and look nearly the same from the design
-viewpoint, but not to a viewer walking past. **Twist alignment** steers it: +
-turns neighbours alike (the solve leans each ribbon toward the one on its left,
+viewpoint, but not to a viewer walking past. **Align twists** steers it. On,
+neighbours turn alike (the solve leans each ribbon toward the one on its left,
 then whole ribbons are mirrored about the view where that lines them up), so a
-viewer walking past sees few stripes and a steady picture; − turns them
-opposite, so the tone holds best from far away but stripes show up close; 0
-chooses for tone alone. The footer's walk-by figures, and the Preview's Viewer
+viewer walking past sees few stripes and a steady picture. Off (the default),
+they turn opposite ways, so the tone holds best from far away but stripes show
+up close as people pass. The footer's walk-by figures, and the Preview's Viewer
 slider, show the effect.
 
 ## 3D view

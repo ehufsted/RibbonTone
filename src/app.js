@@ -32,9 +32,8 @@ const LEN = ['clipWall', 'widthMm', 'heightMm', 'ribbonW', 'pitch', 'thickness',
   'slotClear', 'minSlot', 'combMargin', 'combEnd', 'bedMm', 'minWeb', 'combThick', 'standoff'];
 const NUM = ['reflectance', 'sheen', 'gloss', 'strainPct', 'tensionN', 'density', 'G', 'E', 'bgReflectance', 'distM', 'maxRows', 'maxPerRibbon'];
 const RANGE = { gamma: (v) => v.toFixed(2), brightness: (v) => v.toFixed(2), contrast: (v) => v.toFixed(2),
-  lightAz: (v) => `${v}°`, lightEl: (v) => `${v}°`, ambient: (v) => v.toFixed(2), diffusion: (v) => v.toFixed(2),
-  align: (v) => (v > 0 ? `+${v.toFixed(2)}` : v.toFixed(2)) };
-const CHECK = ['curveOn', 'splitComb', 'box3d', 'shadows3d'];
+  lightAz: (v) => `${v}°`, lightEl: (v) => `${v}°`, ambient: (v) => v.toFixed(2), diffusion: (v) => v.toFixed(2) };
+const CHECK = ['curveOn', 'splitComb', 'box3d', 'shadows3d', 'alignTwists'];
 const SELECT = ['material', 'layout'];
 /** Settings that only change the cutting files: no new solve. */
 // (not slotClear, minSlot, combMargin or standoff: they set the comb depths and so

@@ -31,9 +31,9 @@
 //
 // tone error: mean |ΔL| × 100 against the target (the units of the stats);
 // misalignment: the mean angle between neighbours at each height, modulo 180°,
-// as a share of 90° (0 = parallel, 1 = crossed). w is the "Twist alignment"
-// setting: +1 prefers neighbours alike, 0 tone only (mirroring can still
-// help under a light off to one side), −1 prefers them opposed.
+// as a share of 90° (0 = parallel, 1 = crossed). w is +1 with "Align twists"
+// on (neighbours alike) and −1 off (opposed); 0, tone only, is left for the
+// harness.
 
 import { lutAt } from './optics.js';
 

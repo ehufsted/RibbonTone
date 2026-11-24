@@ -62,13 +62,13 @@ pipeline directly.
    its vertically blurred lightness error to the next, which the eye mixes.
 8. **Twist directions** (`core/align.js`): during the solve, each ribbon's
    ideal path and angle DP carry a small cost (`solve.alignCost`, ALIGN_K per
-   sample at ±1) for turning differently from (or, below 0, alike to) the
-   ribbon on its left. After it, each ribbon is kept or mirrored whole about
+   sample) for turning differently from (Align twists on, +1) or alike to
+   (off, −1) the ribbon on its left. After it, each ribbon is kept or mirrored whole about
    the direction to the viewer (θ → 2α − θ: same look from the design
    viewpoint, same brackets, same rate), chosen exactly over the row. Measured
-   on a viewer 1 m to either side (`offAxisDistortion`): + gives the fewest
-   stripes and a steadier blend than 0; − the steadiest blend but the most
-   stripes. The Preview's Viewer slider shows any sideways position.
+   on a viewer 1 m to either side (`offAxisDistortion`): on gives the fewest
+   stripes and a steadier blend than no preference; off the steadiest blend
+   but the most stripes. The Preview's Viewer slider shows any sideways position.
 9. **Stats**: tone error (lightness ×100, sample by sample) and "as seen"
    (after mixing neighbours 1:2:1 and a pitch down the ribbon), with the ideal
    path's for comparison; brackets; the worst span's peak rate and coil ratio.
