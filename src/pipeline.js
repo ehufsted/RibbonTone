@@ -144,15 +144,18 @@ function solveOnce(rgba, settings, opts = {}) {
       const v = Lt[i][j] + (carry ? carry[j] : 0);
       LtEff[j] = Math.min(range.Lmax + 0.1, Math.max(range.Lmin - 0.1, v));
     }
+    // with alignment, every ribbon leans toward (or away from) the one on its left
+    const al = s.align && i > 0 ? { prev: ribbons[i - 1].th, alignK: s.align * ALIGN_K } : {};
     let ys = rows, guide = ideal[i];
+    // (shared rows keep the plain ideal path as the angle search's centre, as without alignment)
+    if ((carry && !rows) || al.prev) guide = idealPath(Llut[i], LtEff, dy, kmaxDeg, al);
     if (!ys) {
-      if (carry) guide = idealPath(Llut[i], LtEff, dy, kmaxDeg);
       const pk = placeKnots(spanCosts(frame, Llut[i], LtEff, guide, kmaxDeg, grid), grid, Math.max(0, Math.round(s.maxPerRibbon)));
       ys = pk ? [0, ...pk.q.map((q) => q * dy), H] : [0, H];
       if (pk && pk.forced) forcedRibbons++;
     }
     const centers = ys.map((y) => pathAt(guide, y / dy - 0.5));
-    const { angles } = solveAngles(frame, Llut[i], LtEff, ys, centers, kmaxDeg);
+    const { angles } = solveAngles(frame, Llut[i], LtEff, ys, centers, kmaxDeg, al);
     const knots = ys.map((y, k) => ({ y, a: angles[k] }));
     const th = pathFromKnots(frame, knots);
     const L = pathLightness(Llut[i], th);
@@ -171,14 +174,16 @@ function solveOnce(rgba, settings, opts = {}) {
 
   progress('choosing twist directions');
   // mirror whole ribbons where it helps the tone, or lines neighbours up (core/align.js)
-  const mirror = chooseMirrors(ribbons.map((r) => r.th), Llut, Lt, s.align);
+  const mirror = chooseMirrors(ribbons.map((r) => r.th), Llut, Lt, s.align, alphas);
   let mirrored = 0;
   ribbons.forEach((r, i) => {
     if (!mirror[i]) return;
     mirrored++;
-    r.knots = r.knots.map((k) => ({ y: k.y, a: -k.a }));
-    r.th = r.th.map((v) => -v);
-    r.ideal = r.ideal.map((v) => -v);
+    // about the direction to the viewer: the ribbon looks the same from the design viewpoint
+    const m = (v) => 2 * r.alpha - v;
+    r.knots = r.knots.map((k) => ({ y: k.y, a: m(k.a) }));
+    r.th = r.th.map(m);
+    r.ideal = r.ideal.map(m);
     r.L = pathLightness(Llut[i], r.th);
     r.Lideal = pathLightness(Llut[i], r.ideal);
   });
@@ -199,6 +204,14 @@ function solveOnce(rgba, settings, opts = {}) {
   };
 }
 
+/**
+ * The alignment cost per sample at Twist alignment ±1 (core/solve.js
+ * alignCost): about the squared error of 1.4 lightness units for neighbours
+ * crossed at 90°, so it settles which way a ribbon turns but seldom trades
+ * away tone.
+ */
+export const ALIGN_K = 2e-4;
+
 /** How far to either side the off-axis figure looks from, mm. */
 export const OFF_AXIS_MM = 1000;
 
@@ -214,11 +227,10 @@ export const OFF_AXIS_MM = 1000;
  *            pitch down it, no blending): the stripe pattern a viewer close
  *            enough to see single ribbons gets.
  *
- * Mirrored neighbours (core/align.js) trade one for the other: one brightens
- * as the other darkens, which cancels in the blend (steady tone) but is
- * exactly a stripe pattern up close. Aligned neighbours change together: no
- * stripes, but the blended tone moves (more in mid-tones than at black or
- * white, so it is not a uniform shift).
+ * Opposed neighbours (core/align.js) brighten and darken by turns, which
+ * cancels in the blend (steady tone) but is exactly a stripe pattern up
+ * close. Aligned ones change together: few stripes, and a steadier blend than
+ * ribbons turned every which way.
  */
 export function offAxisDistortion(ribbons, s, xv, curvePts, n, dy, walk) {
   const here = ribbons.map((r) => r.L);

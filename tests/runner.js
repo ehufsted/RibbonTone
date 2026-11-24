@@ -58,4 +58,5 @@ export const plain = {
   ...DEFAULTS, widthMm: 300, heightMm: 600, ribbonW: 20, pitch: 30, thickness: 0.25,
   sheen: 0, lightAz: 0, lightEl: 0, ambient: 0, distM: 1000, viewXMm: 0, diffusion: 0,
   layout: 'even', rowSpacing: 100, gamma: 1, brightness: 1, contrast: 1,
+  align: 0,             // tests of alignment set it themselves
 };

@@ -34,15 +34,16 @@ export function run() {
   }
 
   section('core.align: a viewer walking past', 'The whole chain on a picture with structure, front light (so mirroring costs no tone), ' +
-    'seen 1 m to either side. Aligned neighbours (+1) change together: the fewest stripes. Opposed ones (−1) change in opposite directions, ' +
-    'which cancels where the eye blends them: the steadiest blended tone. (First predicted as "+1 best on both"; measured, it is a trade.)');
+    'seen 1 m to either side. Aligned neighbours (+1) change together: the fewest stripes, and a steadier blended picture than no ' +
+    'preference (0), whose haphazard directions do neither. Opposed ones (−1) change in opposite directions, which cancels where the ' +
+    'eye blends them -- the steadiest blended tone -- but is the most stripes up close.');
   const img = makeRGBA(60, 60, (x, y) => { const r = Math.hypot(x - 30, y - 30); const v = Math.round(128 + 110 * Math.cos(r / 4)); return [v, v, v]; });
   const base = { ...plain, widthMm: 600, heightMm: 600, distM: 3, lightAz: 0, lightEl: 30, ambient: 0.3, sheen: 0.1, layout: 'even', rowSpacing: 100 };
   const pos = runPipeline(img, { ...base, align: 1 }), off = runPipeline(img, { ...base, align: 0 }), neg = runPipeline(img, { ...base, align: -1 });
   const o = (p) => p.stats.offAxis;
   check('stripes: aligned (+1) fewest, opposed (−1) most', o(pos).stripes <= o(off).stripes + 1e-9 && o(off).stripes <= o(neg).stripes + 1e-9,
     `+1 ${num(o(pos).stripes, 2)} · 0 ${num(o(off).stripes, 2)} · −1 ${num(o(neg).stripes, 2)}`);
-  check('blended tone: opposed (−1) steadiest, aligned (+1) moves most', o(neg).tone <= o(off).tone + 1e-9 && o(off).tone <= o(pos).tone + 1e-9,
+  check('blended tone: opposed (−1) steadiest, and aligned (+1) steadier than no preference (0)', o(neg).tone <= o(pos).tone + 1e-9 && o(pos).tone <= o(off).tone + 1e-9,
     `+1 ${num(o(pos).tone, 2)} · 0 ${num(o(off).tone, 2)} · −1 ${num(o(neg).tone, 2)}`);
   check('…at about the same tone from the design viewpoint (within 0.3)', Math.abs(pos.stats.tone - neg.stats.tone) < 0.3, `${num(pos.stats.tone, 2)} vs ${num(neg.stats.tone, 2)}`);
   const turns = (p) => p.ribbons.slice(1).reduce((a, r, i) => a + misalignment(p.ribbons[i].th, r.th), 0) / (p.ribbons.length - 1);
